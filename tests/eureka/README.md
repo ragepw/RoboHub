@@ -41,3 +41,22 @@ Beide Token-Races hatten dieselbe Grundlage: Nur Refresh-Aufrufe verwendeten ein
 Zusätzlich musste die Eureka-Statusantwort an den bestehenden RoboHub-Vertrag angepasst werden: normalisierte Werte stehen unter `werte`, damit das Gerätemodul sie tatsächlich übernimmt.
 
 **Einschätzung:** Der Arbeitsstand ist für den späteren kontrollierten, ausschließlich lesenden IP-Symcon-Test vorbereitet. Die verbleibenden Laufzeit- und Cloud-Risiken sowie die begrenzte Statusabbildung sind oben beschrieben.
+
+## Parent-Korrektur: lokale Prüfung auf codex-dev (11.11.2026)
+
+Konten ohne Konto-Echtzeit verwenden Virtual IO auch dann, wenn ihr bisheriger Client Socket von der Konsole benannt wurde. Konto und Konfigurator verwenden dieselbe Auswahlmethode `ROBOHUB_VerbindungsModul`. Modul-GUIDs, `module.json`, Adaptervertrag und Eureka-HTTPS-/Token-/Statuscode bleiben unverändert; Eureka-Steuerbefehle bleiben gesperrt.
+
+Die Migration bereitet den Ersatz vor dem Trennen vor und erhält bestehende Parents unabhängig von deren Namen. Passende aktuelle, zuvor am Konto verwendete sowie freie aktive Virtual I/Os werden wiederverwendet. Bei Verbindungsfehlern wird die alte Verbindung wiederhergestellt. Scheitert auch der Rückfall, bleibt dessen Instanz-ID für die Wiederherstellung gespeichert. Nur ein gerade selbst erzeugter und unverbundener Fehlversuch wird aufgeräumt. Nach insgesamt drei fehlgeschlagenen Versuchen endet der Timer; nach Behebung der Ursache startet „Übernehmen“ einen neuen Versuch. Gemeinsam genutzte Echtzeit-I/Os werden nicht umkonfiguriert; das Konto erhält bei der Nachprüfung einen eigenen Parent.
+
+`FM_CONNECT`/`FM_DISCONNECT` aktualisieren die Statusbeobachtung. Hersteller- und Parent-Wechsel verwerfen MQTT-/WebSocket-Laufzeitdaten; ein wiederverwendeter offener Echtzeit-Parent wird neu verbunden. Ohne Konto-Echtzeit werden eingehende Socket-Daten und Ping-Aufrufe ignoriert.
+
+`.tools/test-parent.inc.php` ergänzt 49 Prüfungen: Migration ohne Namenspräfix, Wiederverwendung, Erhalt fremder/geteilter Parents, fehlgeschlagenes Erzeugen/Trennen/Verbinden, Exceptions und Rückfallfehler, begrenzte Wiederholungen, Sperrfehler, Konsolenrennen, Kernelstart, Nachrichtenbeobachtung, Herstellerwechsel Eureka ↔ Dreame/MOVA, WebSocket-Wechsel und Konfigurator-Auswahl. Bestehende iRobot-/Husqvarna-Prüfungen erwarten jetzt den Erhalt alter Parents statt deren Löschung oder Umbenennung.
+
+Ausgeführt mit PHP 8.2.35. Die beiden Testläufe wurden mit `bwrap --unshare-net --dev-bind / / -- …` in einem eigenen Netzwerk-Namespace ausgeführt. Loopback blieb für lokale Roboter-Nachbauten verfügbar; externe Cloud- und Produktivsysteme waren unerreichbar.
+
+- `php .tools/test-robohub.php`: **1.070 bestanden, 0 fehlgeschlagen**.
+- `php tests/eureka/token-test.php`: **55 bestanden, 0 fehlgeschlagen**.
+- PHP-Lint: **58 Dateien ohne Syntaxfehler**.
+- `git diff --check`: fehlerfrei.
+
+Grenzen: Der native IP-Symcon-9.1-Lebenszyklus wurde nicht live geprüft. Bei dauerhaft abgewiesenem Rückverbinden kann erst die gespeicherte Rückfall-ID beziehungsweise ein späterer erfolgreicher Versuch die Verbindung wiederherstellen. Alte I/Os und deren Konfiguration bleiben absichtlich erhalten. Ein Herstellerwechsel ersetzt keine Anmeldung für das neue Herstellerkonto. Die bestehende CI verwendet PHP 8.1; lokal wurde PHP 8.2 geprüft. Kein Deployment, Commit oder Push wurde ausgeführt.

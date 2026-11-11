@@ -15,6 +15,8 @@ date_default_timezone_set('Europe/Berlin');
 const KR_READY = 10103;
 const IPS_KERNELMESSAGE = 10100;
 const IM_CHANGESTATUS = 10505;
+const FM_CONNECT = 11101;
+const FM_DISCONNECT = 11102;
 const IS_ACTIVE = 102;
 if (!defined('IS_EBASE')) { define('IS_EBASE', 200); }
 const VARIABLETYPE_BOOLEAN = 0;
@@ -32,7 +34,7 @@ $GLOBALS['NEXT'] = 60000;
 $GLOBALS['LOG'] = [];
 $GLOBALS['INST'] = [];     // InstanceID => Modulobjekt
 
-function IPS_GetKernelRunlevel(): int { return KR_READY; }
+function IPS_GetKernelRunlevel(): int { return $GLOBALS['KERNEL_RUNLEVEL'] ?? KR_READY; }
 function IPS_Sleep(int $ms): void {}
 function IPS_SetHidden(int $id, bool $v): bool { $GLOBALS['OBJ'][$id]['hidden'] = $v; return true; }
 function IPS_GetObject(int $id): array { return ['ObjectIsHidden' => (bool)($GLOBALS['OBJ'][$id]['hidden'] ?? false), 'ObjectIdent' => $GLOBALS['OBJ'][$id]['ident'] ?? '']; }
@@ -40,7 +42,7 @@ function IPS_GetObjectIDByIdent(string $ident, int $parent) {
     foreach ($GLOBALS['OBJ'] as $id => $o) { if ($o['ident'] === $ident && $o['parent'] === $parent) { return $id; } }
     return false;
 }
-function IPS_SemaphoreEnter(string $n, int $ms): bool { return true; }
+function IPS_SemaphoreEnter(string $n, int $ms): bool { return !($GLOBALS['PARENT_LOCK_FEHLER'] ?? false) || !str_starts_with($n, 'RoboHubVerbindung_'); }
 function IPS_SemaphoreLeave(string $n): bool { return true; }
 const KL_MESSAGE = 10201;
 const KL_WARNING = 10204;
@@ -51,20 +53,47 @@ function IPS_GetInstanceListByModuleID(string $g): array
 {
     $klasse = ['{DB269BEC-0CA6-4E6A-83B8-78FF8CFB2DB0}' => 'RoboHubKonto', '{631DA85B-5985-4C25-B222-E47FDD49E302}' => 'RoboHubGeraet', '{5AA59E01-AFBF-4669-8899-57F5E2C24C33}' => 'RoboHubKonfigurator'][$g] ?? '';
     $o = [];
-    foreach ($GLOBALS['INST'] as $id => $m) { if ($klasse !== '' && get_class($m) === $klasse) { $o[] = $id; } }
+    foreach ($GLOBALS['INST'] as $id => $m) { if (($klasse !== '' && get_class($m) === $klasse) || ($m instanceof FakeSocket && $m->modul === $g)) { $o[] = $id; } }
     return $o;
 }
-function IPS_ConnectInstance(int $id, int $parent): bool { $GLOBALS['CONNECTS'][] = [$id, $parent]; $GLOBALS['INST'][$id]->parent = $GLOBALS['INST'][$parent]; return true; }
+function IPS_GetInstanceList(): array { return array_keys($GLOBALS['INST']); }
+function IPS_InstanceExists(int $id): bool { return isset($GLOBALS['INST'][$id]); }
+function IPS_ConnectInstance(int $id, int $parent): bool {
+    $GLOBALS['CONNECTS'][] = [$id, $parent];
+    if (isset($GLOBALS['CONNECT_HOOK'])) { ($GLOBALS['CONNECT_HOOK'])($id, $parent); }
+    if ($GLOBALS['INST'][$id]->parent !== null) { return false; }
+    $fehler = array_shift($GLOBALS['CONNECT_FEHLER']);
+    if ($fehler === 'exception') { throw new RuntimeException('Simulierter Verbindungsfehler'); }
+    if ($fehler) { return false; }
+    $GLOBALS['INST'][$id]->parent = $GLOBALS['INST'][$parent];
+    if ($GLOBALS['FLOW_MELDUNGEN'] && $GLOBALS['INST'][$id] instanceof RoboHubKonto) {
+        $GLOBALS['INST'][$id]->MessageSink(0, $id, FM_CONNECT, []);
+    }
+    return true;
+}
 function IPS_DeleteInstance(int $id): bool { $GLOBALS['GELOESCHT'][] = $id; unset($GLOBALS['INST'][$id]); return true; }
-function IPS_DisconnectInstance(int $id): bool { $GLOBALS['INST'][$id]->parent = null; return true; }
+function IPS_DisconnectInstance(int $id): bool {
+    if ($GLOBALS['DISCONNECT_FEHLER']) { return false; }
+    $GLOBALS['INST'][$id]->parent = null;
+    if ($GLOBALS['FLOW_MELDUNGEN'] && $GLOBALS['INST'][$id] instanceof RoboHubKonto) {
+        $GLOBALS['INST'][$id]->MessageSink(0, $id, FM_DISCONNECT, []);
+    }
+    return true;
+}
 function ROBOHUB_GeraeteListe(int $id): string { return $GLOBALS['INST'][$id]->GeraeteListe(); }
 function ROBOHUB_GeraeteSuchen(int $id): string { return $GLOBALS['INST'][$id]->GeraeteSuchen(); }
+function ROBOHUB_VerbindungsModul(int $id): string { return $GLOBALS['INST'][$id]->VerbindungsModul(); }
 $GLOBALS['CONNECTS'] = [];
+$GLOBALS['CONNECT_FEHLER'] = [];
+$GLOBALS['DISCONNECT_FEHLER'] = false;
+$GLOBALS['CREATE_FEHLER'] = false;
+$GLOBALS['FLOW_MELDUNGEN'] = false;
 $GLOBALS['SKRIPTE'] = [];
 function IPS_RunScriptText(string $s): bool { $GLOBALS['SKRIPTE'][] = $s; return true; }
 $GLOBALS['NAMEN'] = [];
 function IPS_CreateInstance(string $guid): int
 {
+    if ($GLOBALS['CREATE_FEHLER']) { return 0; }
     if ($guid === '{DB269BEC-0CA6-4E6A-83B8-78FF8CFB2DB0}') {
         $k = new RoboHubKonto(80000 + count($GLOBALS['INST']));
         $k->Create();
@@ -107,6 +136,7 @@ class IPSModule
     public $timers = [];
     public $debug = [];
     public $fields = [];
+    public $messages = [];
     public $parent = null;   // Konto-Objekt für Kind-Instanzen
 
     public function __construct(int $id) { $this->InstanceID = $id; $GLOBALS['INST'][$id] = $this; }
@@ -130,7 +160,7 @@ class IPSModule
     public function SetStatus(int $s): void { $this->status = $s; }
     public function RegisterTimer(string $n, int $ms, string $s): void { $this->timers[$n] = $ms; }
     public function SetTimerInterval(string $n, int $ms): void { $this->timers[$n] = $ms; }
-    public function RegisterMessage(int $s, int $m): void {}
+    public function RegisterMessage(int $s, int $m): void { $this->messages[$s][$m] = true; }
     public function SendDebug(string $a, string $b, int $c): void { $this->debug[] = "$a: $b"; }
     public function LogMessage(string $m, int $t): void { $GLOBALS['LOG'][] = $m; $GLOBALS['LOGSTUFE'][] = $t; }
     public function UpdateFormField(string $n, string $p, $v): void { $this->fields[] = [$n, $p, $v]; }
@@ -143,7 +173,7 @@ class IPSModule
     public function SetBuffer(string $n, string $v): void { $this->puffer[$n] = $v; }
     public function GetBuffer(string $n): string { return $this->puffer[$n] ?? ''; }
     public function SendDataToChildren(string $json): void { foreach ($GLOBALS['INST'] as $m) { if ($m instanceof IPSModule && $m->parent === $this) { $m->ReceiveData($json); } } }
-    public function UnregisterMessage(int $s, int $m): void {}
+    public function UnregisterMessage(int $s, int $m): void { unset($this->messages[$s][$m]); }
     public $visu = [];
     public $visuTyp = 0;
     public function SetVisualizationType(int $t): void { $this->visuTyp = $t; }
@@ -1923,6 +1953,7 @@ check('höchster News-Eintrag = library.json-Version', end($keys) === $lib['vers
 check('library.json nur Store-Felder', array_keys($lib) === ['id', 'author', 'name', 'url', 'compatibility', 'version', 'build', 'date']);
 
 require __DIR__ . '/test-eureka.inc.php';
+require __DIR__ . '/test-parent.inc.php';
 
 abschnitt('Vertragshygiene');
 foreach (['RoboHubKonto', 'RoboHubGeraet', 'RoboHubKonfigurator'] as $klasse) {

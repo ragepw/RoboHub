@@ -249,7 +249,7 @@ $GLOBALS['GELOESCHT'] = [];
 $hk2->ApplyChanges();
 check('Bestandskonto mit falscher Verbindungsart: Tausch wird eingeplant', ($hk2->timers['Verbindung'] ?? 0) > 0);
 $hk2->VerbindungPruefen();
-check('… alter RoboHub-Socket gelöscht, WebSocket Client verbunden', in_array(8501, $GLOBALS['GELOESCHT'], true) && $hk2->parent instanceof FakeSocket
+check('… alter RoboHub-Socket erhalten, WebSocket Client verbunden', !in_array(8501, $GLOBALS['GELOESCHT'], true) && IPS_InstanceExists(8501) && $hk2->parent instanceof FakeSocket
     && $hk2->parent->modul === '{D68FD31F-0E90-7019-F16C-1949BD3079EF}');
 $fremd = new FakeSocket(8502);
 IPS_SetName(8502, 'Mein eigener Socket');

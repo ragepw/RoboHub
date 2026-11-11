@@ -35,11 +35,10 @@ class RoboHubKonfigurator extends IPSModule
     private const GERAET_GUID = '{631DA85B-5985-4C25-B222-E47FDD49E302}';
     private const SOCKET_GUID = '{3CFF0FD9-E306-41DB-9B5A-9D06D38576C3}';
 
-    /** Modul der Verbindungsinstanz unter dem Konto (Client Socket bzw. WebSocket Client bei Husqvarna/GARDENA). */
+    /** Soll-Typ statt eines möglicherweise noch nicht migrierten oder fehlenden I/Os. */
     private function verbindungsModul(int $kid): string
     {
-        $eltern = (int)(IPS_GetInstance($kid)['ConnectionID'] ?? 0);
-        return $eltern > 0 ? (string)IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] : self::SOCKET_GUID;
+        return ROBOHUB_VerbindungsModul($kid);
     }
 
     public function Create()

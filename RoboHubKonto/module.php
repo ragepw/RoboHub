@@ -132,6 +132,10 @@ class RoboHubKonto extends IPSModule
         $this->RegisterAttributeString('Schnappschuss', '{}');
         $this->RegisterAttributeString('Mqtt', '{}');
         $this->RegisterAttributeInteger('MqttEltern', 0);
+        $this->RegisterAttributeString('VerbindungsHersteller', '');
+        $this->RegisterAttributeString('VerbindungsParents', '{}');
+        $this->RegisterAttributeInteger('VerbindungsVersuche', 0);
+        $this->RegisterAttributeInteger('VerbindungsRueckfall', 0);
         // Echtzeit unter Symcon 9.1 (Rust-TLS): Zertifikate mit Beginn vor 1970 werden abgelehnt.
         // Scheitert der Socket, ohne je verbunden gewesen zu sein, wird er 24 h geschlossen.
         $this->RegisterAttributeBoolean('EchtzeitJeVerbunden', false);
@@ -139,7 +143,9 @@ class RoboHubKonto extends IPSModule
         $this->RegisterAttributeInteger('WsFehler', 0);
         $this->RegisterPropertyBoolean('Echtzeit', true);
         $this->RegisterTimer('MqttPing', 0, 'ROBOHUB_MqttPing($_IPS[\'TARGET\']);');
-        $this->RequireParent(self::CLIENT_SOCKET);
+        $this->RequireParent($this->elternModul());
+        $this->RegisterMessage($this->InstanceID, FM_CONNECT);
+        $this->RegisterMessage($this->InstanceID, FM_DISCONNECT);
         $this->registerFormAttributes();
 
         $this->RegisterTimer('Erneuern', 0, 'ROBOHUB_Erneuern($_IPS[\'TARGET\']);');
@@ -157,31 +163,23 @@ class RoboHubKonto extends IPSModule
             return;
         }
         $this->aktualisiereStatus();
+        $this->verbindungsStandPruefen();
+        $this->WriteAttributeInteger('VerbindungsVersuche', 0);
         // Bestandskonten, deren Echtzeit schon lief, nie wegen eines späteren Fehlers sperren.
         if ((json_decode((string)$this->ReadAttributeString('Mqtt'), true)['zustand'] ?? '') === 'verbunden') {
             $this->WriteAttributeBoolean('EchtzeitJeVerbunden', true);
         }
         $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
         if ($eltern === 0 || IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()
+            || ($this->echtzeitArt() !== '' && $this->elternGeteilt($eltern))
             || ($this->echtzeitArt() === 'websocket' && $this->GetBuffer('WsZiel') === '' && $this->ReadAttributeString('Buendel') !== '')) {
             $this->SetTimerInterval('Verbindung', 15000);
         }
         $this->elternBeobachten();
-        $this->socketBenennen();
         $this->echtzeitKonfigurieren(false);
         // Steht die Verbindung schon beim Start im Fehlerstatus, kommt kein Statuswechsel mehr (Nr. 27).
         if ($this->ReadAttributeBoolean('EchtzeitJeVerbunden') && $this->elternImFehler() && $this->ReadAttributeInteger('WsFehler') === 0) {
             $this->neuVerbindenPlanen();
-        }
-    }
-
-    /** Wurde der Socket noch als Dreame-Konto angelegt (Voreinstellung), den Namen nachziehen. */
-    private function socketBenennen(): void
-    {
-        $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
-        $name = IPS_GetName($this->InstanceID);
-        if ($eltern > 0 && $this->echtzeitArt() === '' && IPS_GetName($eltern) === 'RoboHub Echtzeit (' . $name . ')') {
-            IPS_SetName($eltern, self::ohneEchtzeitName($name));
         }
     }
 
@@ -195,6 +193,23 @@ class RoboHubKonto extends IPSModule
         if ($Message === IPS_KERNELMESSAGE && ($Data[0] ?? null) === KR_READY) {
             $this->ApplyChanges();
             return;
+        }
+        if ($SenderID === $this->InstanceID && in_array($Message, [FM_CONNECT, FM_DISCONNECT], true)) {
+            if ($this->GetBuffer('ParentWechsel') !== '' || IPS_GetKernelRunlevel() !== KR_READY) {
+                return;
+            }
+            $this->elternBeobachten();
+            // Die Konsole beendet zuerst ihre create-Kette; erst danach konfigurieren.
+            if ($this->ReadAttributeInteger('VerbindungsVersuche') < 3) {
+                $this->SetTimerInterval('Verbindung', 15000);
+            }
+            return;
+        }
+        $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+        if ($Message === IM_CHANGESTATUS && ($SenderID !== $eltern || $eltern === 0
+            || IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()
+            || ($this->echtzeitArt() !== '' && $this->elternGeteilt($eltern)))) {
+            return; // verspätete Meldung eines alten oder noch unpassenden Parents
         }
         // Client Socket verbunden/getrennt (Muster Tibber Grid Reward).
         if ($Message === IM_CHANGESTATUS && $SenderID === $this->ReadAttributeInteger('MqttEltern') && $this->echtzeitArt() === 'websocket') {
@@ -542,6 +557,11 @@ class RoboHubKonto extends IPSModule
     /** Einstellungen für den Client Socket (Symcon wendet sie beim Verbinden an). */
     public function GetConfigurationForParent()
     {
+        $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+        if ($eltern > 0 && (IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()
+            || $this->elternGeteilt($eltern))) {
+            return '{}'; // auch die automatische Übernahme schützt fremde/geteilte I/Os
+        }
         if ($this->echtzeitArt() === '') {
             return '{}';   // Virtual IO braucht keine Einstellungen
         }
@@ -594,11 +614,16 @@ class RoboHubKonto extends IPSModule
         if (IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()) {
             return;   // fremde/alte Verbindungsart — VerbindungPruefen tauscht eigene aus
         }
+        if ($this->echtzeitArt() !== '' && $this->elternGeteilt($eltern)) {
+            return;   // gemeinsame I/Os niemals umkonfigurieren
+        }
         if ($this->echtzeitArt() === '') {
             $this->SetTimerInterval('MqttPing', 0);
+            $this->SetBuffer('EchtzeitNeuAnmelden', '');
             $this->mqttStand(['zustand' => 'aus']);
             return;
         }
+        $neuVerbinden = $neuVerbinden || $this->GetBuffer('EchtzeitNeuAnmelden') === '1';
         $soll = json_decode($this->GetConfigurationForParent(), true);
         $offen = $ws ? 'Active' : 'Open';
         $ist = json_decode((string)IPS_GetConfiguration($eltern), true) ?: [];
@@ -640,6 +665,7 @@ class RoboHubKonto extends IPSModule
             $this->mqttStand(['zustand' => 'verbinde', 'host' => $ws ? (string)parse_url((string)$soll['URL'], PHP_URL_HOST) : $soll['Host'] . ':' . $soll['Port']]);
         }
         IPS_RunScriptText($skript);
+        $this->SetBuffer('EchtzeitNeuAnmelden', '');
     }
 
     /**
@@ -657,9 +683,31 @@ class RoboHubKonto extends IPSModule
      */
     public function VerbindungPruefen(): void
     {
+        if (IPS_GetKernelRunlevel() !== KR_READY) {
+            return;
+        }
         $this->SetTimerInterval('Verbindung', 0);
-        $this->verbindungSicherstellen();
+        $sem = 'RoboHubVerbindung_' . $this->InstanceID;
+        $ok = false;
+        if (IPS_SemaphoreEnter($sem, 1000)) {
+            try {
+                $this->verbindungsStandPruefen();
+                $ok = $this->verbindungSicherstellen();
+            } catch (Throwable $e) {
+                // Keine fremden Exception-Texte (möglicherweise Zugangsdaten) protokollieren.
+            } finally {
+                IPS_SemaphoreLeave($sem);
+            }
+        }
         $this->elternBeobachten();
+        if (!$ok) {
+            $n = $this->ReadAttributeInteger('VerbindungsVersuche') + 1;
+            $this->WriteAttributeInteger('VerbindungsVersuche', $n);
+            $this->SetTimerInterval('Verbindung', $n < 3 ? 5000 * $n : 0);
+            $this->protokolliere(RoboHubText::t('The parent connection could not be changed. After three attempts, click Apply to retry.'), KL_WARNING);
+            return;
+        }
+        $this->WriteAttributeInteger('VerbindungsVersuche', 0);
         // SUITE.md Stolperstein 27: Ein Client Socket / WebSocket Client im Fehlerstatus verbindet sich
         // nicht zuverlässig selbst neu — dann schaltet RoboHub ihn selbst aus und wieder an.
         $fehler = $this->elternImFehler();
@@ -739,6 +787,44 @@ class RoboHubKonto extends IPSModule
         return $art === 'websocket' ? self::WS_CLIENT : ($art === 'mqtt' ? self::CLIENT_SOCKET : self::VIRTUAL_IO);
     }
 
+    /** Gemeinsame Auswahlquelle für Konto und Konfigurator; rein lokal. */
+    public function VerbindungsModul(): string
+    {
+        return $this->elternModul();
+    }
+
+    private function verbindungsStandPruefen(): void
+    {
+        $neu = $this->ReadPropertyString('Hersteller') . ':' . $this->echtzeitArt();
+        $alt = $this->ReadAttributeString('VerbindungsHersteller');
+        if (($alt !== '' && $alt !== $neu) || $this->echtzeitArt() === '') {
+            $this->echtzeitStandVerwerfen();
+        }
+        $this->WriteAttributeString('VerbindungsHersteller', $neu);
+    }
+
+    private function echtzeitStandVerwerfen(): void
+    {
+        $this->SetTimerInterval('MqttPing', 0);
+        $this->SetBuffer('MqttEingang', '');
+        $this->SetBuffer('WsZiel', '');
+        $this->SetBuffer('EchtzeitNeuAnmelden', '1');
+        $this->WriteAttributeString('Mqtt', '{}');
+        $this->WriteAttributeBoolean('EchtzeitJeVerbunden', false);
+        $this->WriteAttributeInteger('EchtzeitGesperrtBis', 0);
+        $this->WriteAttributeInteger('WsFehler', 0);
+    }
+
+    private function elternGeteilt(int $id): bool
+    {
+        foreach (IPS_GetInstanceList() as $kind) {
+            if ($kind !== $this->InstanceID && (int)(IPS_GetInstance($kind)['ConnectionID'] ?? 0) === $id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** WebSocket-Ziel vom Treiber holen und im Puffer ablegen; true, wenn es sich geändert hat. */
     private function wsZielAktualisieren(): bool
     {
@@ -779,36 +865,99 @@ class RoboHubKonto extends IPSModule
         $this->mqttStand(['zustand' => $this->ReadPropertyBoolean('Echtzeit') ? 'getrennt' : 'aus']);
     }
 
-    private function verbindungSicherstellen(): void
+    private function verbindungSicherstellen(): bool
     {
         // Jedes Konto bekommt eine Verbindungsinstanz, auch ohne Echtzeit (seit 0.25.0 dann ein
         // Virtual IO statt eines geschlossenen Client Sockets): Das Modul verlangt sie, und Symcon 9.1
         // verwendet ein Konto ohne ihn in der Konfigurator-Kette nicht wieder, sondern
         // legt ein neues, unvollständiges an (Forum Thilo, 20.10.2026).
         $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
-        if ($eltern !== 0) {
-            // Falsche Verbindungsart (z. B. Husqvarna-Konto aus der Zeit vor der WebSocket-Echtzeit) —
-            // nur austauschen, wenn RoboHub sie selbst angelegt hat (Name „RoboHub …"), Fremdes nie anfassen.
-            if (IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] === $this->elternModul() || strpos(IPS_GetName($eltern), 'RoboHub ') !== 0) {
-                return;
+        $rueckfall = $this->ReadAttributeInteger('VerbindungsRueckfall');
+        if ($eltern === 0 && $rueckfall > 0 && IPS_InstanceExists($rueckfall)) {
+            if (!@IPS_ConnectInstance($this->InstanceID, $rueckfall)) {
+                return false;
             }
-            IPS_DisconnectInstance($this->InstanceID);
-            @IPS_DeleteInstance($eltern);
-            $this->protokolliere(RoboHubText::t('Replaced the connection instance with %s.', ['websocket' => RoboHubText::t('a WebSocket Client'), 'mqtt' => RoboHubText::t('a Client Socket'), '' => RoboHubText::t('a Virtual IO')][$this->echtzeitArt()]));
+            $eltern = $rueckfall;
         }
-        $id = @IPS_CreateInstance($this->elternModul());
-        if (!$id) {
-            $this->protokolliere(RoboHubText::t('The connection instance below the account could not be created.'), KL_WARNING);
-            return;
+        $this->WriteAttributeInteger('VerbindungsRueckfall', 0);
+        $modul = $this->elternModul();
+        $bekannt = json_decode($this->ReadAttributeString('VerbindungsParents'), true) ?: [];
+        if ($eltern > 0) {
+            $ist = (string)IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'];
+            if ($ist === $modul && ($modul === self::VIRTUAL_IO || !$this->elternGeteilt($eltern))) {
+                $bekannt[$ist] = $eltern;
+                $this->WriteAttributeString('VerbindungsParents', (string)json_encode($bekannt));
+                return true;
+            }
+            // Ohne Echtzeit auch den von der Konsole benannten Socket ablösen. Andere
+            // fremde Transportkonfigurationen weiterhin dem Benutzer überlassen.
+            if (!in_array($ist, [self::CLIENT_SOCKET, self::WS_CLIENT, self::VIRTUAL_IO], true)
+                || ($ist !== $modul && $modul !== self::VIRTUAL_IO && strpos(IPS_GetName($eltern), 'RoboHub ') !== 0
+                    && !in_array($eltern, $bekannt, true))) {
+                return true;
+            }
+            $bekannt[$ist] = $eltern;
         }
-        // Inzwischen doch verbunden (z. B. von der Konsole)? Dann den eigenen wieder entfernen.
-        if ((int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) !== 0 || !@IPS_ConnectInstance($this->InstanceID, $id)) {
-            @IPS_DeleteInstance($id);
-            return;
+        $id = (int)($bekannt[$modul] ?? 0);
+        if ($id > 0 && (!IPS_InstanceExists($id) || IPS_GetInstance($id)['ModuleInfo']['ModuleID'] !== $modul
+            || ($modul !== self::VIRTUAL_IO && $this->elternGeteilt($id)))) {
+            $id = 0;
         }
-        IPS_SetName($id, $this->echtzeitArt() !== ''
-            ? 'RoboHub Echtzeit (' . IPS_GetName($this->InstanceID) . ')'
-            : self::ohneEchtzeitName(IPS_GetName($this->InstanceID)));
+        if ($id === 0 && $modul === self::VIRTUAL_IO) {
+            // Ein freier, aktiver Virtual IO hat keine herstellerspezifische Konfiguration.
+            // Bereits anderweitig verwendete I/Os werden nicht ungefragt geteilt.
+            foreach (IPS_GetInstanceListByModuleID($modul) as $kandidat) {
+                if (IPS_GetInstance($kandidat)['InstanceStatus'] === IS_ACTIVE && !$this->elternGeteilt($kandidat)) {
+                    $id = $kandidat;
+                    break;
+                }
+            }
+        }
+        $neu = $id === 0;
+        $this->SetBuffer('ParentWechsel', '1');
+        try {
+            if ($neu) {
+                $id = @IPS_CreateInstance($modul);
+                if (!$id) {
+                    return false;
+                }
+                IPS_SetName($id, $modul === self::VIRTUAL_IO ? self::ohneEchtzeitName(IPS_GetName($this->InstanceID))
+                    : 'RoboHub Echtzeit (' . IPS_GetName($this->InstanceID) . ')');
+            }
+            // Vorbereitung fertig: vor dem Trennen noch einmal auf Konsolenänderungen prüfen.
+            if ((int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) !== $eltern) {
+                return false;
+            }
+            $this->WriteAttributeInteger('VerbindungsRueckfall', $eltern);
+            if ($eltern > 0 && !@IPS_DisconnectInstance($this->InstanceID)) {
+                return false;
+            }
+            if (!@IPS_ConnectInstance($this->InstanceID, $id)
+                || (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) !== $id) {
+                return false;
+            }
+            $bekannt[$modul] = $id;
+            $this->WriteAttributeString('VerbindungsParents', (string)json_encode($bekannt));
+            return true;
+        } finally {
+            $aktuell = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+            // Auch bei Exceptions zurückverbinden; bestehende I/Os niemals löschen.
+            try {
+                if ($aktuell === 0 && $eltern > 0 && IPS_InstanceExists($eltern)) {
+                    @IPS_ConnectInstance($this->InstanceID, $eltern);
+                }
+            } catch (Throwable $e) {
+                // Rückfall-ID bleibt für den nächsten begrenzten Versuch gespeichert.
+            } finally {
+                if ((int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) > 0) {
+                    $this->WriteAttributeInteger('VerbindungsRueckfall', 0);
+                }
+                $this->SetBuffer('ParentWechsel', '');
+                if ($neu && $id > 0 && (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) !== $id && !$this->elternGeteilt($id)) {
+                    @IPS_DeleteInstance($id); // nur der gerade selbst erzeugte, unverbundene Kandidat
+                }
+            }
+        }
     }
 
     private function elternBeobachten(): void
@@ -817,6 +966,9 @@ class RoboHubKonto extends IPSModule
         $vorher = $this->ReadAttributeInteger('MqttEltern');
         if ($vorher !== $eltern && $vorher > 0) {
             $this->UnregisterMessage($vorher, IM_CHANGESTATUS);
+        }
+        if ($vorher !== $eltern) {
+            $this->echtzeitStandVerwerfen();
         }
         $this->WriteAttributeInteger('MqttEltern', $eltern);
         if ($eltern > 0) {
@@ -854,6 +1006,11 @@ class RoboHubKonto extends IPSModule
     /** Timer: Verbindung am Leben halten; ohne jede Antwort seit 3 Intervallen neu verbinden. */
     public function MqttPing(): void
     {
+        $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+        if ($this->echtzeitArt() === '' || $eltern === 0
+            || IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul() || $this->elternGeteilt($eltern)) {
+            return;
+        }
         if ($this->echtzeitArt() === 'websocket') {
             $t = $this->treiber();
             $text = method_exists($t, 'wsLebenszeichen') ? $t->wsLebenszeichen() : null;
@@ -881,6 +1038,9 @@ class RoboHubKonto extends IPSModule
     /** Daten vom Client Socket (Bytes als UTF-8, Verbund-Muster Fernwirk101). */
     public function ReceiveData($JSONString)
     {
+        if ($this->echtzeitArt() === '') {
+            return '';
+        }
         $paket = json_decode((string)$JSONString, true);
         if (!is_array($paket) || !isset($paket['Buffer'])) {
             return '';

@@ -97,21 +97,22 @@ check('ohne Echtzeit: Virtual IO angelegt (immer aktiv, kein „übergeordnete I
     && $GLOBALS['SKRIPTE'] === [] && $ik->GetConfigurationForParent() === '{}', IPS_GetName($isock) . ' ' . implode("\n", $GLOBALS['SKRIPTE']));
 IPS_SetName($isock, 'RoboHub Echtzeit (' . IPS_GetName(7000) . ')');   // angelegt, als noch Dreame voreingestellt war
 $ik->ApplyChanges();
-check('alter Name „Echtzeit" wird bei iRobot zu „ohne Echtzeit"', strpos(IPS_GetName($isock), 'ohne Echtzeit') !== false, IPS_GetName($isock));
+check('bestehender Virtual IO wird auch bei altem Namen nicht umbenannt', IPS_GetName($isock) === 'RoboHub Echtzeit (' . IPS_GetName(7000) . ')');
 // Bestandskonto (bis 0.24.0): geschlossener Client Socket von RoboHub → wird gegen Virtual IO getauscht.
 $ik->parent->modul = '{3CFF0FD9-E306-41DB-9B5A-9D06D38576C3}';
 IPS_SetName($isock, 'RoboHub Verbindung (' . IPS_GetName(7000) . ', ungenutzt)');
 $ik->ApplyChanges();
 $GLOBALS['GELOESCHT'] = [];
 $ik->VerbindungPruefen();
-check('Bestandskonto: alter RoboHub-Socket entfernt, Virtual IO verbunden', in_array($isock, $GLOBALS['GELOESCHT'], true)
+check('Bestandskonto: alter RoboHub-Socket erhalten, Virtual IO verbunden', !in_array($isock, $GLOBALS['GELOESCHT'], true) && IPS_InstanceExists($isock)
     && $ik->parent->modul === '{6179ED6A-FC31-413C-BB8E-1204150CF376}');
 $fremd = $ik->parent;
 $fremd->modul = '{3CFF0FD9-E306-41DB-9B5A-9D06D38576C3}';
 IPS_SetName($fremd->InstanceID, 'Mein eigener Socket');
 $GLOBALS['GELOESCHT'] = [];
 $ik->VerbindungPruefen();
-check('fremde Verbindungsinstanz bleibt unangetastet', $GLOBALS['GELOESCHT'] === [] && $ik->parent === $fremd);
+check('fremde Verbindungsinstanz bleibt erhalten, Konto verwendet Virtual IO', $GLOBALS['GELOESCHT'] === [] && IPS_InstanceExists($fremd->InstanceID)
+    && $ik->parent !== $fremd && $ik->parent->modul === '{6179ED6A-FC31-413C-BB8E-1204150CF376}');
 $fremd->modul = '{6179ED6A-FC31-413C-BB8E-1204150CF376}';
 
 $irr = new RoboHubGeraet(7100);

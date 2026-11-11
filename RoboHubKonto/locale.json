@@ -1764,6 +1764,7 @@
             "🧡  About this module": "🧡  Über dieses Modul",
             "🧪 RoboHub is new. Does your robot work? Is a value missing, or do you have a model that is not supported yet? Feel free to post in the RoboHub thread in the Symcon forum — with the model name and, if available, the content of \"Raw data\".": "🧪 RoboHub ist neu. Läuft dein Roboter? Fehlt ein Wert, oder hast du ein Modell, das noch nicht dabei ist? Schreib es gern in den RoboHub-Thread im Symcon-Forum — mit Modellname und, falls vorhanden, dem Inhalt von „Rohdaten\".",
             "🧹 so far %s%s min": "🧹 bisher %s%s min",
+            "The parent connection could not be changed. After three attempts, click Apply to retry.": "Die übergeordnete Verbindung konnte nicht geändert werden. Nach drei Versuchen zum Wiederholen auf Übernehmen klicken.",
             "🪟  Form: layout%s": "🪟  Formular: Aufbau%s"
         }
     }
