@@ -48,7 +48,7 @@ const KL_MESSAGE = 10201;
 const KL_WARNING = 10204;
 function IPS_GetLibrary(string $guid): array { $l = json_decode(file_get_contents(dirname(__DIR__) . '/library.json'), true); return ['Version' => $l['version'] . '-beta.1', 'Build' => $l['build']]; }
 function IPS_SetProperty(int $id, string $n, $v): bool { $GLOBALS['INST'][$id]->props[$n] = $v; return true; }
-function IPS_ApplyChanges(int $id): bool { $GLOBALS['INST'][$id]->ApplyChanges(); return true; }
+function IPS_ApplyChanges(int $id): bool { return $GLOBALS['INST'][$id]->ApplyChanges() !== false; }
 function IPS_GetInstanceListByModuleID(string $g): array
 {
     $klasse = ['{DB269BEC-0CA6-4E6A-83B8-78FF8CFB2DB0}' => 'RoboHubKonto', '{631DA85B-5985-4C25-B222-E47FDD49E302}' => 'RoboHubGeraet', '{5AA59E01-AFBF-4669-8899-57F5E2C24C33}' => 'RoboHubKonfigurator'][$g] ?? '';
@@ -100,7 +100,12 @@ function IPS_CreateInstance(string $guid): int
         $GLOBALS['ERZEUGT'][] = [$guid, $k->InstanceID];
         return $k->InstanceID;
     }
-    $s = new FakeSocket(70000 + count($GLOBALS['INST'])); $s->modul = $guid; $GLOBALS['ERZEUGT'][] = [$guid, $s->InstanceID]; return $s->InstanceID;
+    $s = new FakeSocket(70000 + count($GLOBALS['INST']));
+    $s->modul = $guid;
+    // Native Virtual I/Os sind nach dem Erzeugen geschlossen; Status 102 würde fehlende Aktivierung verdecken.
+    if ($guid === '{6179ED6A-FC31-413C-BB8E-1204150CF376}') { $s->status = 104; }
+    $GLOBALS['ERZEUGT'][] = [$guid, $s->InstanceID];
+    return $s->InstanceID;
 }
 function IPS_SetName(int $id, string $n): bool { $GLOBALS['NAMEN'][$id] = $n; if (isset($GLOBALS['OBJ'][$id])) { $GLOBALS['OBJ'][$id]['name'] = $n; } return true; }
 function IPS_GetConfiguration(int $id): string { return json_encode($GLOBALS['INST'][$id]->config ?? []); }
@@ -109,11 +114,24 @@ class FakeSocket
 {
     public $InstanceID;
     public $config = ['Open' => false];
+    public $props = [];
+    public $applyAnzahl = 0;
     public $modul = '{3CFF0FD9-E306-41DB-9B5A-9D06D38576C3}';
     public $gesendet = [];
     public $status = 102;   // Instanzstatus (IS_ACTIVE; Fehlerstatus ≥ 200 für Stolperstein 27)
     public $parent = null;
     public function __construct(int $id) { $this->InstanceID = $id; $GLOBALS['INST'][$id] = $this; }
+    public function ApplyChanges(): bool
+    {
+        $this->applyAnzahl++;
+        if (isset($GLOBALS['IO_APPLY_HOOK'])) { ($GLOBALS['IO_APPLY_HOOK'])($this); }
+        $fehler = $GLOBALS['IO_APPLY_FEHLER'] ?? '';
+        if ($fehler === 'exception') { throw new RuntimeException('Simulierter Aktivierungsfehler'); }
+        if ($fehler === 'false') { return false; }
+        $this->config = array_replace($this->config, $this->props);
+        $this->status = $this->config['Open'] && $fehler !== 'inaktiv' ? IS_ACTIVE : 104;
+        return true;
+    }
     public function ForwardData(string $json): string { $d = json_decode($json, true); $this->gesendet[] = mb_convert_encoding($d['Buffer'], 'ISO-8859-1', 'UTF-8'); return ''; }
 }
 function mqttVomServer($konto, string $bytes): void
@@ -168,8 +186,9 @@ class IPSModule
     public $elternMeldung = null;           // null = normal; false = HasActiveParent() meldet fälschlich „nein" (Live-Befund)
     public function HasActiveParent(): bool { return $this->elternMeldung ?? ($this->parent !== null); }
     public $puffer = [];
-    // Wie live beobachtet: RequireParent() legt bei Bestandsinstanzen nichts an.
-    public function RequireParent(string $guid): void {}
+    public $requiredParents = [];
+    // Wie live beobachtet: RequireParent() merkt die Vorgabe, legt bei Bestandsinstanzen nichts an.
+    public function RequireParent(string $guid): void { $this->requiredParents[] = $guid; }
     public function SetBuffer(string $n, string $v): void { $this->puffer[$n] = $v; }
     public function GetBuffer(string $n): string { return $this->puffer[$n] ?? ''; }
     public function SendDataToChildren(string $json): void { foreach ($GLOBALS['INST'] as $m) { if ($m instanceof IPSModule && $m->parent === $this) { $m->ReceiveData($json); } } }

@@ -143,13 +143,14 @@ class RoboHubKonto extends IPSModule
         $this->RegisterAttributeInteger('WsFehler', 0);
         $this->RegisterPropertyBoolean('Echtzeit', true);
         $this->RegisterTimer('MqttPing', 0, 'ROBOHUB_MqttPing($_IPS[\'TARGET\']);');
-        $this->RequireParent($this->elternModul());
+        // GetCompatibleParents() meldet den jeweils gewählten Hersteller. Hier noch keinen
+        // Parent festlegen: Bei der Erstinstallation gilt zunächst der Standard Dreame.
         $this->RegisterMessage($this->InstanceID, FM_CONNECT);
         $this->RegisterMessage($this->InstanceID, FM_DISCONNECT);
         $this->registerFormAttributes();
 
         $this->RegisterTimer('Erneuern', 0, 'ROBOHUB_Erneuern($_IPS[\'TARGET\']);');
-        // Client Socket erst verzögert selbst anlegen: beim Neuanlegen bietet die Konsole ihn selbst an
+        // Passenden Parent erst verzögert selbst anlegen: beim Neuanlegen bietet die Konsole ihn selbst an
         // (Forum 13.10.2026: „hat bereits ein übergeordnetes Objekt", wenn RoboHub schneller war).
         $this->RegisterTimer('Verbindung', 0, 'ROBOHUB_VerbindungPruefen($_IPS[\'TARGET\']);');
     }
@@ -554,6 +555,18 @@ class RoboHubKonto extends IPSModule
     // Echtzeit (MQTT)
     // -----------------------------------------------------------------
 
+    /** Parent-Vorgabe für die Konsole; dieselbe Auswahl wie bei der verzögerten Migration. */
+    public function GetCompatibleParents(): string
+    {
+        $modul = $this->elternModul();
+        $parent = ['moduleID' => $modul];
+        if ($modul === self::VIRTUAL_IO) {
+            // Nur neu in der Konsole angelegte I/Os aktivieren; bestehende nicht verändern.
+            $parent['initial'] = ['Open' => true];
+        }
+        return (string)json_encode(['type' => 'require', 'modules' => [$parent]]);
+    }
+
     /** Einstellungen für den Client Socket (Symcon wendet sie beim Verbinden an). */
     public function GetConfigurationForParent()
     {
@@ -923,6 +936,12 @@ class RoboHubKonto extends IPSModule
                 }
                 IPS_SetName($id, $modul === self::VIRTUAL_IO ? self::ohneEchtzeitName(IPS_GetName($this->InstanceID))
                     : 'RoboHub Echtzeit (' . IPS_GetName($this->InstanceID) . ')');
+                // Virtual IO startet geschlossen (Open=false). Nur den selbst angelegten
+                // Kandidaten aktivieren und prüfen, bevor die alte Verbindung getrennt wird.
+                if ($modul === self::VIRTUAL_IO && (!@IPS_SetProperty($id, 'Open', true)
+                    || !@IPS_ApplyChanges($id) || IPS_GetInstance($id)['InstanceStatus'] !== IS_ACTIVE)) {
+                    return false;
+                }
             }
             // Vorbereitung fertig: vor dem Trennen noch einmal auf Konsolenänderungen prüfen.
             if ((int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0) !== $eltern) {

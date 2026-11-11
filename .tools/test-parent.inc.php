@@ -23,8 +23,9 @@ function parentKonto(string $marke, ?FakeSocket $io = null): RoboHubKonto
 {
     static $id = 200000;
     $konto = new RoboHubKonto(++$id);
-    $konto->props['Hersteller'] = $marke;
     $konto->Create();
+    // Wie die Konsole: Create kennt zunächst nur Dreame; Hersteller erst danach setzen.
+    IPS_SetProperty($konto->InstanceID, 'Hersteller', $marke);
     $konto->parent = $io;
     return $konto;
 }
@@ -252,11 +253,121 @@ try {
     $rennen->VerbindungPruefen();
     check('Konkurrierende Konsolenverbindung wird nicht überschrieben oder gelöscht', $rennen->parent === $konsoleIo
         && IPS_InstanceExists($alt->InstanceID) && IPS_InstanceExists($konsoleIo->InstanceID) && count($GLOBALS['INST']) === $anzahl);
+
+    abschnitt('Dynamische Parent-Kompatibilität und Virtual-IO-Aktivierung');
+    // Mit echten Treibern alle registrierten Hersteller prüfen; der Callback darf kein Netz benötigen.
+    $fabrik = $GLOBALS['robohubTreiberFabrik'];
+    unset($GLOBALS['robohubTreiberFabrik']);
+    try {
+        $marken = (new ReflectionClass(RoboHubKonto::class))->getConstant('HERSTELLER');
+        $k = parentKonto('dreame');
+        $vorher = [count($GLOBALS['INST']), $GLOBALS['ERZEUGT'], $GLOBALS['CONNECTS'], $GLOBALS['SKRIPTE']];
+        foreach (array_keys($marken) as $marke) {
+            IPS_SetProperty($k->InstanceID, 'Hersteller', $marke);
+            $guid = match ($marke) {
+                'dreame', 'mova' => $client,
+                'husqvarna', 'gardena' => $websocket,
+                default => $virtual,
+            };
+            $vorgabe = json_decode($k->GetCompatibleParents(), true, 512, JSON_THROW_ON_ERROR);
+            check('Native Parent-Vorgabe für ' . $marke . ' folgt sofort der Herstellerauswahl', $vorgabe['type'] === 'require'
+                && count($vorgabe['modules']) === 1 && $vorgabe['modules'][0]['moduleID'] === $guid
+                && !isset($vorgabe['moduleIDs']) && $k->VerbindungsModul() === $guid);
+            check('Initialkonfiguration für ' . $marke . ' betrifft nur neue Virtual I/Os',
+                ($vorgabe['modules'][0]['initial'] ?? []) === ($guid === $virtual ? ['Open' => true] : [])
+                && !isset($vorgabe['modules'][0]['configuration']));
+        }
+        check('Kompatibilitätsabfragen erzeugen, verbinden und konfigurieren keine I/Os',
+            $vorher === [count($GLOBALS['INST']), $GLOBALS['ERZEUGT'], $GLOBALS['CONNECTS'], $GLOBALS['SKRIPTE']]);
+    } finally {
+        $GLOBALS['robohubTreiberFabrik'] = $fabrik;
+    }
+
+    // Isolierte Erstinstallation: keine vorhandenen Virtual I/Os, welche die Aktivierung verdecken könnten.
+    $GLOBALS['INST'] = [];
+    $erst = new RoboHubKonto(201000);
+    $erst->Create();
+    $vorgabe = json_decode($erst->GetCompatibleParents(), true);
+    check('Erstinstallation meldet zunächst Dreame/Client Socket ohne feste RequireParent-Vorgabe',
+        $erst->ReadPropertyString('Hersteller') === 'dreame' && $erst->requiredParents === []
+        && $vorgabe['modules'][0]['moduleID'] === $client && $erst->parent === null && count($GLOBALS['INST']) === 1);
+    $erst->ApplyChanges();
+    check('Erstinstallation wartet auf die Konsole, bevor sie selbst einen Parent anlegt', $erst->parent === null
+        && $erst->timers['Verbindung'] === 15000 && count($GLOBALS['INST']) === 1);
+    $erst->VerbindungPruefen();
+    $ersterSocket = $erst->parent;
+    check('Erstinstallation ohne Konsolen-Parent erhält verzögert den Client Socket', $ersterSocket->modul === $client);
+    foreach (['eureka', 'dreame', 'mova', 'husqvarna', 'gardena', 'eureka'] as $marke) {
+        IPS_SetProperty($erst->InstanceID, 'Hersteller', $marke);
+        $vorgabe = json_decode($erst->GetCompatibleParents(), true);
+        $erst->ApplyChanges();
+        $erst->VerbindungPruefen();
+        check('Herstellerwechsel ' . $marke . ': angebotener und verbundener Parent stimmen überein',
+            $erst->parent->modul === $vorgabe['modules'][0]['moduleID']);
+    }
+    check('Selbst angelegter Eureka-Virtual-IO wird genau einmal explizit aktiviert',
+        $erst->parent->config === ['Open' => true] && $erst->parent->status === IS_ACTIVE && $erst->parent->applyAnzahl === 1);
+
+    $GLOBALS['INST'] = [];
+    $konsole = parentKonto('eureka');
+    $vorgabe = json_decode($konsole->GetCompatibleParents(), true)['modules'][0];
+    $id = IPS_CreateInstance($vorgabe['moduleID']);
+    check('Virtual-IO-Nachbau startet wie Symcon geschlossen', IPS_GetInstance($id)['InstanceStatus'] === 104
+        && json_decode(IPS_GetConfiguration($id), true) === ['Open' => false]);
+    // SDK: initial wird nur bei einer neuen Instanz übernommen, nicht bei einer vorhandenen.
+    foreach ($vorgabe['initial'] as $name => $wert) { IPS_SetProperty($id, $name, $wert); }
+    IPS_ApplyChanges($id);
+    IPS_ConnectInstance($konsole->InstanceID, $id);
+    $konsole->ApplyChanges();
+    $konsole->VerbindungPruefen();
+    check('Herstellerauswahl nach Create: neuer Konsolen-Virtual-IO ist aktiv und wird beibehalten',
+        $konsole->parent->InstanceID === $id && $konsole->parent->status === IS_ACTIVE
+        && $konsole->parent->config === ['Open' => true] && $konsole->parent->applyAnzahl === 1 && count($GLOBALS['INST']) === 2);
+
+    $GLOBALS['INST'] = [];
+    $ohneKonsole = parentKonto('eureka');
+    $ohneKonsole->ApplyChanges();
+    $ohneKonsole->VerbindungPruefen();
+    check('Eureka-Erstinstallation ohne Konsole erhält direkt einen aktiven Virtual IO',
+        $ohneKonsole->parent->modul === $virtual && $ohneKonsole->parent->config === ['Open' => true]
+        && $ohneKonsole->parent->status === IS_ACTIVE && $ohneKonsole->parent->applyAnzahl === 1);
+
+    foreach (['false', 'exception', 'inaktiv'] as $art) {
+        $GLOBALS['INST'] = [];
+        $alterSocket = new FakeSocket(202000);
+        $k = parentKonto('eureka', $alterSocket);
+        $GLOBALS['IO_APPLY_FEHLER'] = $art;
+        $GLOBALS['IO_APPLY_HOOK'] = static function (FakeSocket $io) use ($k, $alterSocket): void {
+            check('Virtual IO wird vor dem Trennen der alten Verbindung aktiviert', $k->parent === $alterSocket
+                && $io->props['Open'] === true);
+        };
+        $k->VerbindungPruefen();
+        check('Virtual-IO-Aktivierungsfehler ' . $art . ' erhält alten Parent und räumt nur neuen Kandidaten auf',
+            $k->parent === $alterSocket && count($GLOBALS['INST']) === 2 && $alterSocket->config === ['Open' => false]
+            && $alterSocket->applyAnzahl === 0 && $k->timers['Verbindung'] === 5000 && $k->GetBuffer('ParentWechsel') === '');
+        unset($GLOBALS['IO_APPLY_FEHLER'], $GLOBALS['IO_APPLY_HOOK']);
+        $k->VerbindungPruefen();
+        check('Nach Aktivierungsfehler ' . $art . ' gelingt die begrenzte Wiederholung',
+            $k->parent->modul === $virtual && $k->parent->status === IS_ACTIVE && IPS_InstanceExists($alterSocket->InstanceID));
+    }
+
+    $GLOBALS['INST'] = [];
+    $fremderVirtual = new FakeSocket(202001);
+    $fremderVirtual->modul = $virtual;
+    $fremderVirtual->status = 104;
+    $k = parentKonto('eureka', $fremderVirtual);
+    $geteilt = parentKonto('eureka', $fremderVirtual);
+    $k->ApplyChanges();
+    $k->VerbindungPruefen();
+    check('Vorhandener geteilter inaktiver Virtual IO wird nicht ungefragt aktiviert', $k->parent === $fremderVirtual
+        && $geteilt->parent === $fremderVirtual && $fremderVirtual->config === ['Open' => false]
+        && $fremderVirtual->status === 104 && $fremderVirtual->applyAnzahl === 0 && $k->GetConfigurationForParent() === '{}');
 } finally {
     foreach ($parentStand as $key => $value) { $GLOBALS[$key] = $value; }
     $GLOBALS['CONNECT_FEHLER'] = [];
     $GLOBALS['DISCONNECT_FEHLER'] = false;
     $GLOBALS['CREATE_FEHLER'] = false;
     $GLOBALS['FLOW_MELDUNGEN'] = false;
-    unset($GLOBALS['CONNECT_HOOK'], $GLOBALS['KERNEL_RUNLEVEL'], $GLOBALS['PARENT_LOCK_FEHLER']);
+    unset($GLOBALS['CONNECT_HOOK'], $GLOBALS['KERNEL_RUNLEVEL'], $GLOBALS['PARENT_LOCK_FEHLER'],
+        $GLOBALS['IO_APPLY_FEHLER'], $GLOBALS['IO_APPLY_HOOK']);
 }

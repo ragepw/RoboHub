@@ -60,3 +60,21 @@ Ausgeführt mit PHP 8.2.35. Die beiden Testläufe wurden mit `bwrap --unshare-ne
 - `git diff --check`: fehlerfrei.
 
 Grenzen: Der native IP-Symcon-9.1-Lebenszyklus wurde nicht live geprüft. Bei dauerhaft abgewiesenem Rückverbinden kann erst die gespeicherte Rückfall-ID beziehungsweise ein späterer erfolgreicher Versuch die Verbindung wiederherstellen. Alte I/Os und deren Konfiguration bleiben absichtlich erhalten. Ein Herstellerwechsel ersetzt keine Anmeldung für das neue Herstellerkonto. Die bestehende CI verwendet PHP 8.1; lokal wurde PHP 8.2 geprüft. Kein Deployment, Commit oder Push wurde ausgeführt.
+
+## Verbleibende Kompatibilitätswarnung: lokale Korrektur (11.11.2026)
+
+Die bestätigte Live-Diagnose zeigt einen aktiven, datenflusskompatiblen Eureka-Parent, während `IPS_GetCompatibleParents` ausschließlich Client Socket meldet. Im Stand `85a1781` ruft `Create()` bereits `RequireParent($this->elternModul())` auf. Bei der Erstinstallation ist der Hersteller allerdings noch Dreame: Die Vorgabe bleibt dadurch Client Socket, auch wenn die spätere Migration bereits Virtual IO verbunden hat. Laut [SDK-Dokumentation zu IPS_GetCompatibleParents](https://www.symcon.de/de/service/dokumentation/befehlsreferenz/instanzenverwaltung/verbindungen/ips-getcompatibleparents/) liefert ein eigener Callback die angebotenen Parent-Typen; andernfalls gilt die hinterlegte RequireParent-Vorgabe.
+
+`RoboHubKonto::GetCompatibleParents()` verwendet jetzt direkt `elternModul()`: Virtual IO für Eureka und alle übrigen Hersteller ohne Konto-Echtzeit, Client Socket für Dreame/MOVA, WebSocket Client für Husqvarna/GARDENA. Der Typ bleibt `require`. Die [SDK-Struktur `modules` mit `initial`](https://www.symcon.de/de/service/dokumentation/entwicklerbereich/sdk-tools/sdk-php/module/getcompatibleparents/) setzt bei einem neu in der Konsole erzeugten Virtual IO `Open=true`, ohne vorhandene Instanzen zu verändern oder deren Konfiguration zu erzwingen.
+
+Die RequireParent-Vorgabe in `Create()` entfällt. Das Modul verlangt bereits Symcon 9.0, der Callback ist ab 8.2 verfügbar. Die Konsole erhält damit auch nach einer Herstellerauswahl die passende Vorgabe. Ohne Konsolen-Parent planen `ApplyChanges()` beziehungsweise die Kernelstart-Nachricht weiterhin den bestehenden verzögerten Fallback. Dieser erzeugt, aktiviert und prüft einen neuen Virtual IO vor dem Trennen des bisherigen Parents. Bei Aktivierungsfehlern bleibt die alte Verbindung erhalten, nur der neue unverbundene Kandidat wird aufgeräumt, und die vorhandene begrenzte Wiederholung greift.
+
+Die Regressionen ergänzen die Erstinstallation mit und ohne Konsole, die Herstellerauswahl nach `Create()`, alle 22 Hersteller mit echten Treibern, die Übereinstimmung von angebotenen und verbundenen Parent-Typen nach Herstellerwechseln, die einmalige Aktivierung sowie abgewiesene, geworfene und wirkungslose Aktivierungsversuche. Der Virtual-IO-Nachbau startet jetzt wie die native Instanz mit `Open=false` und Status 104. Vorhandene fremde oder geteilte Virtual I/Os werden weiterhin nicht ungefragt aktiviert.
+
+Ergebnis auf `codex-dev`, PHP 8.2.35, beide Prüfstände mit `bwrap --unshare-net --dev-bind / / -- …` gegen externe Netzzugriffe isoliert:
+
+- Vollständiger RoboHub-Prüfstand: **1.138 bestanden, 0 fehlgeschlagen**, davon **68 neue Regressionen** zusätzlich zu den bisherigen 1.070 Prüfungen.
+- Eureka-Token-Prüfstand: **55 bestanden, 0 fehlgeschlagen**.
+- PHP-Lint: **58 Dateien ohne Syntaxfehler**; `git diff --check`: fehlerfrei.
+
+Die Datenfluss-GUIDs und sämtliche `module.json` sowie Eureka-HTTPS und Token-Verwaltung bleiben unverändert. Die native IP-Symcon-9.1-Konsole wurde nicht ausgeführt; die Übernahme von `initial` und das Verschwinden der Warnung sind dort noch zu bestätigen. Ein bereits vorhandener inaktiver Virtual IO bleibt zum Schutz bestehender Konfigurationen inaktiv. Keine Cloud-Probe, Änderung produktiver Instanzen, Bereitstellung, Commit oder Push.
