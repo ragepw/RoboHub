@@ -18,6 +18,9 @@ class RoboHubEureka implements RoboHubTreiber
      */
     public $beiUnauthorized = null;
 
+    /** Lokaler Konto-/Gerätekontext, nach Erwerb der Gerätesperre erneut lesen. */
+    public $befehlsKontext = null;
+
     protected function jetzt(): int
     {
         return time();
@@ -28,7 +31,7 @@ class RoboHubEureka implements RoboHubTreiber
     private const APP_VERSION = '1.2.1.26101001';
     // Nur nach gesonderter Freigabe und Review im Quellcode änderbar.
     private const BEFEHLE_FREIGEGEBEN = false;
-    // Kein lokaler Nachweis einer E20-Zuordnung vorhanden. Keine Modell-Heuristik.
+    // Keine bestätigte E20-Befehlsfreigabe vorhanden. Keine Modell-Heuristik.
     private const BEFEHLS_ZUORDNUNGEN = [];
 
     protected function transport(
@@ -375,13 +378,17 @@ class RoboHubEureka implements RoboHubTreiber
         if (!self::BEFEHLE_FREIGEGEBEN) {
             throw new RoboHubFehler('Eureka: Steuerbefehle noch nicht freigegeben.');
         }
+        if (!is_callable($this->befehlsKontext)) {
+            throw new RoboHubFehler('Eureka: Lokale Kontextprüfung fehlt; kein Versand.');
+        }
         // Das Konto liefert bereits ein erneuertes und persistiertes Bündel.
         // Eine neue Instanz entspricht genau einem Versuch, ohne POST-Wiederholung.
         $weg = new RoboHubEurekaBefehlsweg(
             fn(string $method, string $path, string $token, ?array $body): array =>
                 $this->transport($method, $path, $token, $body),
             self::BEFEHLS_ZUORDNUNGEN,
-            $this->beiUnauthorized
+            $this->beiUnauthorized,
+            $this->befehlsKontext
         );
         return $weg->befehl($buendel, $geraet, $befehl, $parameter, $this->jetzt());
     }

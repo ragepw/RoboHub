@@ -12,10 +12,12 @@ final class RoboHubEurekaBefehlsweg
     private $transport;
     private $beiUnauthorized;
     private array $zuordnungen;
+    private $kontextLesen;
     private bool $verbraucht = false;
 
-    public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null)
+    public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null, ?callable $kontextLesen = null)
     {
+        $this->kontextLesen = $kontextLesen;
         $this->transport = $transport;
         $this->zuordnungen = $zuordnungen;
         $this->beiUnauthorized = $beiUnauthorized;
@@ -124,6 +126,37 @@ final class RoboHubEurekaBefehlsweg
     }
 
     public function ausfuehren(array $buendel, array $geraet, string $befehl, array $parameter, int $jetzt): array
+    {
+        if ($this->verbraucht) {
+            throw new RoboHubFehler('Eureka: Befehlsversuch bereits verbraucht; kein doppelter Versand.');
+        }
+        // Global pro Cloud-Gerät, auch über Konto-/Treiber-/Befehlsobjekte hinweg.
+        // Kein Token oder individuelle Gerätekennung im Sperrnamen oder Log.
+        RoboHubEurekaProtokoll::identifikation($geraet);
+        $id = $geraet['id'];
+        $sem = 'RoboHubEureka_Geraet_' . hash('sha256', 'eu:robozone:' . $id);
+        if (!function_exists('IPS_SemaphoreEnter') || !function_exists('IPS_SemaphoreLeave') ||
+            !IPS_SemaphoreEnter($sem, 1)) {
+            throw new RoboHubFehler('Eureka: Gerät belegt oder Synchronisierung nicht verfügbar; kein Versand.');
+        }
+        try {
+            if (is_callable($this->kontextLesen)) {
+                $kontext = ($this->kontextLesen)($id, $buendel);
+                $geraet = $kontext['geraet'];
+                $buendel = $kontext['buendel'];
+                $jetzt = $kontext['jetzt'];
+            }
+            if (($geraet['id'] ?? null) !== $id) {
+                throw new RoboHubFehler('Eureka: Gerätebindung geändert; kein Versand.');
+            }
+            // Sämtliche Berechtigungs- und Zustandsprüfungen INNERHALB der Sperre.
+            return $this->ausfuehrenGesperrt($buendel, $geraet, $befehl, $parameter, $jetzt);
+        } finally {
+            IPS_SemaphoreLeave($sem);
+        }
+    }
+
+    private function ausfuehrenGesperrt(array $buendel, array $geraet, string $befehl, array $parameter, int $jetzt): array
     {
         if ($this->verbraucht) {
             throw new RoboHubFehler('Eureka: Befehlsversuch bereits verbraucht; kein doppelter Versand.');

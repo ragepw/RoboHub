@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/command-fixtures.php';
+require_once __DIR__ . '/command-lock-fixture.php';
 
 $tests = [];
 // Golden Frames unabhängig aus der Python-Referenz ce933e6 ermittelt.
@@ -101,24 +102,22 @@ $tests['E20-Modell allein bestätigt keine Protokollfamilie'] = static function 
     commandAssert($ident['sn8'] === null && $ident['protoVersion'] === null && $ident['platform'] === null && $ident['plugin'] === null);
     commandError(fn() => RoboHubEurekaProtokoll::pruefeZuordnung($d, commandMappings()));
 };
-$tests['E20: bekannte B8-Familie ohne erfundene SN8 und ohne Gerätefreigabe'] = static function (): void {
+$tests['E20: live bestätigte SN8 und B8-Familie und ohne Gerätefreigabe'] = static function (): void {
     $fixture = e20Fixture(); $d = $fixture['geraet'];
     $ident = RoboHubEurekaProtokoll::identifikation($d);
-    commandAssert($ident['productModel'] === 'E20 Evo Plus' && $ident['sn8'] === null
+    commandAssert($ident['productModel'] === 'E20 Evo Plus' && $ident['sn8'] === '750Y0015'
         && $ident['platform'] === 'robozone' && $ident['plugin']['versionName'] === '2.5.4'
-        && $fixture['beobachteteMetadaten']['Produktkennung'] === '750Y0015'
-        && $fixture['beobachteteMetadaten']['Stationstyp'] === 'dust_station'
+        && $d['roh']['product']['sn8'] === '750Y0015'
+        && $d['roh']['product']['stationType'] === 'dust_station'
         && RoboHubEurekaProtokoll::referenzFamilie($ident) === RoboHubEurekaProtokoll::FAMILIE);
-    // Auch eine künstliche exakte Zuordnung darf fehlende SN8 nicht überbrücken.
-    $mapping = [['identifikation' => $ident, 'familie' => RoboHubEurekaProtokoll::FAMILIE, 'beleg' => 'Offline-Test']];
-    foreach ([[], commandMappings(), $mapping] as $m) {
+    foreach ([[], commandMappings()] as $m) {
         $calls = 0;
         $w = new RoboHubEurekaBefehlsweg(static function () use (&$calls): array { $calls++; return commandResponse(); }, $m);
         commandError(fn() => $w->ausfuehren(commandBundle(), $d, 'pause', [], COMMAND_NOW));
         commandAssert($calls === 0);
     }
     $t = new GuardEureka();
-    foreach (['start', 'pause', 'station'] as $cmd) {
+    foreach (['start', 'pause', 'resume', 'station'] as $cmd) {
         commandError(fn() => $t->befehl(commandBundle(), $d, $cmd, []));
     }
     commandAssert($t->calls === 0);
@@ -141,7 +140,7 @@ $tests['Bekannte SN8 überstimmt kein widersprüchliches Plugin'] = static funct
     }
 };
 $tests['E20: widersprüchliche Metadaten werden abgewiesen'] = static function (): void {
-    foreach (['productModel', 'protoVersion', 'platform'] as $field) {
+    foreach (['productModel', 'sn8', 'protoVersion', 'platform'] as $field) {
         $d = e20Fixture()['geraet']; $d['roh'][$field] = $field === 'protoVersion' ? 1 : 'different';
         commandError(fn() => RoboHubEurekaProtokoll::identifikation($d));
     }
@@ -184,7 +183,7 @@ foreach (['cleaning', 'pause', 'stop'] as $state) {
     $tests['Station aus ' . $state] = static fn() => commandAssert(commandPlan(commandDevice($state), 'station', [])['body']['data'] === 'AA0DB80000000000000222010016');
 }
 foreach (['unknown', 'sleep', 'upgrading', 'charging_pause', 'wiping_pause', 'error', 'charging_back', 'positioning', ''] as $state) {
-    foreach (['start', 'pause', 'station'] as $cmd) {
+    foreach (['start', 'pause', 'resume', 'station'] as $cmd) {
         $tests['Keine riskante Entscheidung ' . $state . '/' . $cmd] = static fn() => commandError(fn() => commandPlan(commandDevice($state), $cmd, []));
     }
 }
@@ -320,6 +319,112 @@ $tests['Zweite Sperre am echten Transport vor cURL, unabhängig vom Befehlseinst
     $transport = new ReflectionMethod(RoboHubEureka::class, 'transport');
     foreach (['/devices/commands/offline-device', '/devices/commands', '/devices/commands/offline-device?x=1'] as $path) {
         commandError(fn() => $transport->invoke($t, 'POST', $path, 'fixture-secret', ['data' => 'fixture-secret']));
+    }
+};
+
+$tests['Zwei unabhängige Anforderungen: gleiches Gerät blockiert, anderes Gerät unabhängig'] = static function (): void {
+    $calls = 0;
+    $transport = static function () use (&$calls): array {
+        $calls++;
+        Fiber::suspend('POST');
+        return commandResponse();
+    };
+    $w1 = new RoboHubEurekaBefehlsweg($transport, commandMappings());
+    $w2 = new RoboHubEurekaBefehlsweg($transport, commandMappings());
+    $w3 = new RoboHubEurekaBefehlsweg($transport, commandMappings());
+    $d = commandDevice('pause'); $other = $d;
+    $other['id'] = $other['roh']['deviceId'] = $other['stand']['deviceId'] = 'offline-other-device';
+    $f1 = new Fiber(fn() => $w1->ausfuehren(commandBundle(), $d, 'start', [], COMMAND_NOW));
+    $f2 = new Fiber(fn() => commandError(fn() => $w2->ausfuehren(commandBundle(), $d, 'start', [], COMMAND_NOW)));
+    $f3 = new Fiber(fn() => $w3->ausfuehren(commandBundle(), $other, 'start', [], COMMAND_NOW));
+    commandAssert($f1->start() === 'POST');
+    $f2->start();
+    commandAssert($f2->isTerminated() && $calls === 1);
+    commandAssert($f3->start() === 'POST' && $calls === 2 && count($GLOBALS['commandLocks']) === 2);
+    foreach (array_keys($GLOBALS['commandLocks']) as $key) {
+        commandAssert(preg_match('/^RoboHubEureka_Geraet_[a-f0-9]{64}$/D', $key) === 1);
+    }
+    $f1->resume(); $f3->resume();
+    commandAssert($GLOBALS['commandLocks'] === []);
+};
+$tests['Sperrtimeout sendet nichts und gibt keine fremde Sperre frei'] = static function (): void {
+    $GLOBALS['commandLockTimeout'] = true;
+    try {
+        $w = new RoboHubEurekaBefehlsweg(static function (): array { throw new RuntimeException('Unzulässiger Transport'); }, commandMappings());
+        commandError(fn() => $w->ausfuehren(commandBundle(), commandDevice(), 'start', [], COMMAND_NOW));
+        commandAssert($GLOBALS['commandLocks'] === []);
+    } finally { $GLOBALS['commandLockTimeout'] = false; }
+};
+foreach (['timeout', 'exception', 'http', 'auth', 'parser', 'context'] as $case) {
+    $tests['Sperrfreigabe ohne POST-Retry: ' . $case] = static function () use ($case): void {
+        $calls = 0;
+        $w = new RoboHubEurekaBefehlsweg(static function () use (&$calls, $case): array {
+            $calls++;
+            return match ($case) {
+                'timeout' => ['status' => 200, 'response' => '{"errorCode":"0080005"}'],
+                'exception' => throw new RuntimeException('fixture-secret'),
+                'http' => commandResponse(null, 500),
+                'auth' => commandResponse(null, 401),
+                default => ['status' => 200, 'response' => 'invalid'],
+            };
+        }, commandMappings(), static function (): void { throw new RuntimeException('fixture-secret'); },
+        $case === 'context' ? static function (): array { throw new RoboHubFehler('Kontext geändert'); } : null);
+        commandError(fn() => $w->ausfuehren(commandBundle(), commandDevice('pause'), 'start', [], COMMAND_NOW));
+        commandAssert($calls === ($case === 'context' ? 0 : 1) && $GLOBALS['commandLocks'] === []);
+        if ($case !== 'context') {
+            commandError(fn() => $w->ausfuehren(commandBundle(), commandDevice('pause'), 'start', [], COMMAND_NOW));
+            commandAssert($calls === 1);
+        }
+        // Unabhängiger, expliziter späterer Versuch kann die freigegebene Sperre erwerben.
+        $next = new RoboHubEurekaBefehlsweg(static fn() => commandResponse(), commandMappings());
+        commandAssert($next->ausfuehren(commandBundle(), commandDevice('pause'), 'start', [], COMMAND_NOW)['angenommen']);
+    };
+}
+foreach (['binding', 'state', 'metadata', 'age', 'token'] as $case) {
+    $tests['Nach Sperrerwerb erneut prüfen: ' . $case] = static function () use ($case): void {
+        $d = commandDevice('pause'); $bundle = commandBundle(); $calls = 0;
+        $GLOBALS['commandAfterLock'] = static function () use (&$d, &$bundle, $case): void {
+            match ($case) {
+                'binding' => $d['id'] = 'offline-other-device',
+                'state' => $d['stand']['roh']['state'] = 'unknown',
+                'metadata' => $d['roh']['product']['sn8'] = 'unknown',
+                'age' => $d['stand']['zeit'] -= 121,
+                'token' => $bundle['region'] = 'na',
+            };
+        };
+        $w = new RoboHubEurekaBefehlsweg(static function () use (&$calls): array { $calls++; return commandResponse(); }, commandMappings(), null,
+            static function () use (&$d, &$bundle): array {
+                commandAssert(count($GLOBALS['commandLocks']) === 1);
+                return ['geraet' => $d, 'buendel' => $bundle, 'jetzt' => COMMAND_NOW];
+            });
+        commandError(fn() => $w->ausfuehren(commandBundle(), commandDevice('pause'), 'start', [], COMMAND_NOW));
+        commandAssert($calls === 0 && $GLOBALS['commandLocks'] === []);
+    };
+}
+$tests['E20: fehlende SN8 bleibt auch bei künstlicher Zuordnung gesperrt'] = static function (): void {
+    $d = e20Fixture()['geraet']; unset($d['roh']['product']['sn8']);
+    $ident = RoboHubEurekaProtokoll::identifikation($d);
+    commandError(fn() => RoboHubEurekaProtokoll::pruefeZuordnung($d, [
+        ['identifikation' => $ident, 'familie' => RoboHubEurekaProtokoll::FAMILIE, 'beleg' => 'Offline-Test'],
+    ]));
+};
+
+$tests['E20: Plugin-SN8-Widerspruch bleibt auch bei exakter Testzuordnung gesperrt'] = static function (): void {
+    $d = e20Fixture()['geraet']; $d['roh']['product']['sn8'] = '610VR510';
+    $ident = RoboHubEurekaProtokoll::identifikation($d);
+    commandAssert(RoboHubEurekaProtokoll::referenzFamilie($ident) === null);
+    commandError(fn() => RoboHubEurekaProtokoll::pruefeZuordnung($d, [
+        ['identifikation' => $ident, 'familie' => RoboHubEurekaProtokoll::FAMILIE, 'beleg' => 'Offline-Test'],
+    ]));
+};
+$tests['E20: verschachtelte Plugin- und Panelwerte müssen übereinstimmen'] = static function (): void {
+    foreach (['name', 'versionName'] as $field) {
+        $d = e20Fixture()['geraet']; $d['roh']['panel'][$field] = 'unknown';
+        commandError(fn() => RoboHubEurekaProtokoll::identifikation($d));
+    }
+    foreach (['productModel', 'sn8', 'protoVersion', 'platform'] as $field) {
+        $d = e20Fixture()['geraet']; unset($d['roh']['product'][$field]);
+        commandError(fn() => RoboHubEurekaProtokoll::pruefeZuordnung($d, []));
     }
 };
 

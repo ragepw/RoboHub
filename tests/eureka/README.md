@@ -12,45 +12,38 @@ git diff --check
 
 Der neue, weiterhin produktiv gesperrte Befehlsweg ist in
 [docs/eureka-steuerung.md](../../docs/eureka-steuerung.md) beschrieben:
-Gerätenachweise und fehlende E20-Zuordnung, Rahmen, Start/Resume-Entscheidung,
-eigener POST-Parser, Token-Anbindung, Sicherheitsgrenzen und späterer Einmaltest.
-`command-test.php` nutzt simulierte Gerätezuordnungen und Antworten sowie den
-aus früheren Untersuchungsangaben rekonstruierten `e20-fixture.php` (kein Original-JSON);
-`command-fixtures.php` ist kein produktives Geräteprofil.
+live bestätigter Gerätecache, Trennung von B8-Familie und Befehlsfreigabe,
+Rahmen, Start/Resume-Entscheidung, POST-Parser, Gerätesemaphore und Token-Anbindung.
+`e20-fixture.php` bildet die laut Auftrag live bestätigte Struktur anonymisiert
+ab: `product.sn8=750Y0015`, verschachteltes `product.plugin` und `panel` Version
+2.5.4. IDs und Statuswerte sind erfunden. `command-fixtures.php` enthält nur eine
+simulierte Referenzzuordnung, kein produktives Geräteprofil.
 
-## Aktueller Befehlsweg-Prüfstand (11.11.2026)
+## Aktueller lokaler Prüfstand (11.11.2026, Basis bb8a926)
 
-Metadatenbereinigung geprüft mit PHP 8.2.35. Alle drei Prüfstände liefen mit
-`bwrap --unshare-net --dev-bind / / -- …`: keine externe Netzwerkverbindung,
-Loopback für lokale Roboter-Nachbauten bleibt verfügbar.
+Die drei Prüfstände laufen auf `codex-dev` mit
+`bwrap --unshare-net --dev-bind / / -- …`. Externe Netzzugriffe sind damit
+unterbunden; Loopback bleibt für die lokalen Roboter-Nachbauten verfügbar.
+Die manuellen Cloud-Proben werden nicht ausgeführt.
 
-- RoboHub-Gesamttests: **1.140 bestanden, 0 Fehler**.
-- Eureka-Befehlstests: **205 bestanden, 0 Fehler**.
-- Token-/GET-Tests: **66 bestanden, 0 Fehler**.
-- PHP-Lint: **63 Dateien ohne Syntaxfehler**.
-- `git diff --check` und entsprechende Whitespace-Prüfung neuer Dateien: fehlerfrei.
+- Eureka-Befehlstests: **230 bestanden, 0 Fehler**.
+- Token-/GET-Tests: **72 bestanden, 0 Fehler**.
+- RoboHub-Gesamttests: **1.140 bestanden, 0 Fehler** (einschließlich Parent-Regressionen).
+- PHP-Lint: **64 Dateien ohne Syntaxfehler**.
+- `git diff --check`: fehlerfrei, ebenso die separate Prüfung der neuen Datei.
 
-Die E20-Tests prüfen ausdrücklich B8-Erkennung bei weiterhin unbekannter SN8,
-Ablehnung auch einer künstlichen exakten Zuordnung ohne SN8, keinen Transport
-beim produktiven Einstieg sowie unveränderte Freigabekonstante und leere
-Produktivzuordnung. Weitere Regressionen prüfen fremde Plugins, unbekannte
-Versionen, widersprüchliche Metadaten und explizite ungültige Nullwerte.
-Der vollständige Diff einschließlich aller neuen Dateien wurde auf sensible
-Informationen geprüft: ausschließlich synthetische Zugangsdaten und Geräte-IDs;
-keine echten Tokens oder personenbezogenen Gerätekennungen gefunden.
+Die neuen Fiber-Interleavings prüfen zwei unabhängige Anforderungen an dasselbe
+Gerät (nur ein POST) und den gleichzeitigen Versand an ein anderes Gerät.
+Weitere Prüfungen sichern Sperrtimeout, Freigabe auf Fehlerpfaden, Kontextänderung
+nach Sperrerwerb sowie die echten lokalen Konto-Attribute ab. Der Konto-401-Race
+verwendet zwei unterschiedliche Geräte, um weiterhin die gemeinsame zentrale
+Token-Rotation bei unabhängigen Befehlen zu prüfen.
 
-Als weiterhin gesperrte Offline-Vorbereitung ist ein Commit vertretbar. Die
-Metadatenmatrix und verbleibenden Aktivierungsrisiken stehen in der verlinkten
-Dokumentation. Änderungen bleiben lokal; kein Commit oder Push wurde ausgeführt.
-Historische Ergebnisse weiter unten beziehen sich auf frühere Stände.
-
-Die Produktivsperre wurde sowohl über den finalen Treibereinstieg als auch direkt
-am echten Transport vor cURL geprüft. Ein Timeout oder eine bereits angenommene
-Anfrage kann innerhalb desselben Befehlsversuchs keinen zweiten POST auslösen.
-Cloud-Annahme wird niemals als tatsächliche Ausführung ausgewiesen.
-Die E20-B8-Familie ist durch die Untersuchungsangaben gestützt; die
-Gerätefreigabe bleibt unbestätigt und produktiv leer. Kein Commit,
-Push, Deployment, Cloud-Befehl oder Eingriff in produktive IP-Symcon-Instanzen.
+Unverändert: Freigabekonstante `false`, produktive Gerätezuordnung leer,
+Transportsperre vor cURL und keine zusätzlichen Symcon-Aktionen. Start, Pause,
+Resume und Station bleiben produktiv gesperrt. Keine Cloud-Anfrage, produktiver
+IP-Symcon-Zugriff, Bereitstellung, Commit oder Push. Historische Prüfstände
+weiter unten beziehen sich auf frühere Stände.
 
 `token-test.php` prüft mit deterministischen Fiber-Interleavings die tatsächlichen Konto-Schreibpfade. Die Semaphore-Nachbildung hält getrennte Sperren und lässt konkurrierende Refreshs gezielt warten. Abmeldung und Anmeldung laufen während eines angehaltenen Cloud-Transports. Geprüft werden auch identische Tokens einer neuen Sitzung, verspätete Auth-Fehler, Rotation und Sperr-Timeouts. Alle Zugangsdaten sind erfundene Offline-Fixtures.
 

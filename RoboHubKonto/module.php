@@ -1215,6 +1215,22 @@ class RoboHubKonto extends IPSModule
     {
         $treiber = $this->treiberNeu();
         if ($treiber instanceof RoboHubEureka) {
+            // Nur für den späteren Befehlsaufruf merken; keine neue Sperre im Lesepfad.
+            $sitzung = [$this->ReadAttributeString('Buendel'), $this->ReadAttributeString('BuendelRevision')];
+            $treiber->befehlsKontext = function (string $id, array $buendel) use ($sitzung): array {
+                // Ausschließlich Attribute; kein GET/Refresh unter der Gerätesperre.
+                if ($this->ReadPropertyString('Hersteller') !== 'eureka' ||
+                    $this->buendelStand() !== $sitzung ||
+                    (json_decode($sitzung[0], true) ?: []) !== $buendel) {
+                    throw new RoboHubFehler('Eureka: Kontobindung geändert; kein Versand.');
+                }
+                foreach (json_decode($this->ReadAttributeString('Geraete'), true) ?: [] as $geraet) {
+                    if (($geraet['id'] ?? null) !== $id) { continue; }
+                    $geraet['stand'] = (array)((json_decode($this->ReadAttributeString('Schnappschuss'), true) ?: [])[$id]['p'] ?? []);
+                    return ['geraet' => $geraet, 'buendel' => $buendel, 'jetzt' => time()];
+                }
+                throw new RoboHubFehler('Eureka: Gerätebindung fehlt; kein Versand.');
+            };
             $treiber->beiUnauthorized = function (string $access): array {
                 return $this->gueltigesBuendel($access);
             };

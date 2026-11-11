@@ -12,6 +12,7 @@ $GLOBALS['gesperrt'] = false;
 $GLOBALS['locks'] = [];
 function IPS_SemaphoreEnter(string $name, int $timeout): bool
 {
+    if (str_starts_with($name, 'RoboHubEureka_Geraet_') && isset($GLOBALS['locks'][$name])) { return false; }
     if (!$GLOBALS['sperre'] || ($GLOBALS['timeoutName'] ?? '') === $name) { return false; }
     while (isset($GLOBALS['locks'][$name])) {
         pruefe(Fiber::getCurrent() !== null);
@@ -401,7 +402,9 @@ $tests['Befehlsweg: parallele 401 verwenden eine zentral persistierte Rotation, 
     $w1 = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $callback);
     $w2 = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $callback);
     $f1 = new Fiber(static fn() => fehler(fn() => $w1->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW)));
-    $f2 = new Fiber(static fn() => fehler(fn() => $w2->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW)));
+    $other = commandDevice('pause');
+    $other['id'] = $other['roh']['deviceId'] = $other['stand']['deviceId'] = 'offline-other-device';
+    $f2 = new Fiber(static fn() => fehler(fn() => $w2->ausfuehren(buendel(), $other, 'start', [], COMMAND_NOW)));
     pruefe($f1->start() === 'command-refresh' && $f2->start() === 'wartet');
     $f1->resume(); $f2->resume();
     pruefe($f1->isTerminated() && $f2->isTerminated() && $t->aufrufe === 3);
@@ -435,6 +438,30 @@ foreach (['direkt', 'data', 'list', 'devices', 'items', 'ohne-errorCode'] as $fo
         $t->antworten[] = ['status' => 200, 'response' => json_encode($payload)];
         $devices = $t->geraete(buendel());
         pruefe(count($devices) === 1 && $devices[0]['modell'] === 'E20 Evo Plus' && $t->aufrufe === 1);
+    };
+}
+foreach (['current', 'state', 'removed', 'session', 'same-token-session', 'lock-timeout'] as $case) {
+    $tests['Befehl: echter lokaler Kontokontext nach Gerätesperre / ' . $case] = static function () use ($case): void {
+        $t = new OfflineEureka(); $k = konto($t, buendel());
+        $d = commandDevice('pause'); $d['stand']['zeit'] = time();
+        $k->attrs['Geraete'] = json_encode([$d]);
+        $k->attrs['Schnappschuss'] = json_encode([$d['id'] => ['p' => $d['stand']]]);
+        $callback = $k->neuerTreiber()->befehlsKontext;
+        if ($case === 'state') {
+            $d['stand']['roh']['state'] = 'unknown';
+            $k->attrs['Schnappschuss'] = json_encode([$d['id'] => ['p' => $d['stand']]]);
+        } elseif ($case === 'removed') { $k->attrs['Geraete'] = '[]'; }
+        elseif ($case === 'session') { $k->attrs['Buendel'] = ''; }
+        elseif ($case === 'same-token-session') { $k->attrs['BuendelRevision'] = 'new-session'; }
+        elseif ($case === 'lock-timeout') { $GLOBALS['timeoutName'] = 'RoboHubKonto_Buendel_123'; }
+        $calls = 0;
+        $w = new RoboHubEurekaBefehlsweg(static function () use (&$calls): array { $calls++; return commandResponse(); }, commandMappings(), null, $callback);
+        try {
+            $run = fn() => $w->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW);
+            if ($case === 'current') { pruefe($run()['angenommen']); }
+            else { fehler($run); }
+            pruefe($calls === ($case === 'current' ? 1 : 0) && $t->aufrufe === 0 && $GLOBALS['locks'] === []);
+        } finally { unset($GLOBALS['timeoutName']); }
     };
 }
 $fehler = 0;

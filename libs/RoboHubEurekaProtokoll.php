@@ -125,6 +125,10 @@ final class RoboHubEurekaProtokoll
         if ($sn8 !== null && (!is_string($sn8) || trim($sn8) === '')) {
             return null;
         }
+        if ($plugin !== null && $sn8 !== null &&
+            preg_replace('/\.zip\z/D', '', substr($plugin['name'], 6)) !== $sn8) {
+            return null;
+        }
         return $plugin !== null || in_array($sn8, ['610VR510', '620VR520', '9A0VR870'], true)
             ? self::FAMILIE : null;
     }

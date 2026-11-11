@@ -1,32 +1,35 @@
 # Eureka E20 Evo Plus: lokal vorbereiteter Befehlsweg
 
 Stand: 11.11.2026, `codex-dev`, Branch `feature/eureka-e20-evo-plus`, Ausgangscommit
-`100f6d6`. Ausschließlich Offline-Implementierung. Kein Zugriff auf produktive Konten,
+`bb8a926`. Ausschließlich Offline-Implementierung. Kein Zugriff auf produktive Konten,
 Geräte oder den produktiven IP-Symcon-Server; keine Cloud-Proben.
 
 ## Gerätekompatibilität und Beleglage
 
-Untersucht wurden die vorhandenen Projektdateien, Tests und Dokumentation sowie
-die lokale Referenz `~/projekte/eureka-protokoll-referenz`, Commit `ce933e6`.
-Ein gespeicherter vollständiger E20-Gerätedatensatz lag in diesen Quellen nicht vor.
-Es wurden keine zusätzlichen Cloud-Abfragen ausgeführt.
+Die folgenden Metadaten sind laut Auftrag vom 11.11.2026 live im gespeicherten
+Gerätecache bestätigt: `ROBOHUB_GeraeteListe(45174)`, Pfad
+`geraete[0].roh.product` beziehungsweise `geraete[0].roh.panel`.
+Die Instanznummer bezeichnet die übermittelte Quelle; während dieser Entwicklung
+wurde weder diese Instanz noch die Cloud angesprochen. Die lokale Referenz
+`~/projekte/eureka-protokoll-referenz`, Commit `ce933e6`, bleibt die Quelle der
+Offline-Befehlsrahmen, nicht der Nachweis ihrer E20-Befehlssemantik.
 
-| Merkmal | E20-Wert / Herkunft | Lokaler Belegstatus |
-| --- | --- | --- |
-| Produktmodell (`productModel`) | `E20 Evo Plus`, frühere Cloud-Untersuchung laut Auftrag | E20-Wert nicht durch Original-JSON belegt; Feldstruktur in `coordinator.py` |
-| Produktkennung | `750Y0015`, frühere Cloud-Untersuchung laut Auftrag | Ursprünglicher JSON-Feldpfad unbekannt; separat beobachtete Metainformation, kein erfundenes API-Feld |
-| Protokollversion (`protoVersion`) | `0`, frühere Cloud-Untersuchung laut Auftrag | Referenz unterstützt Version 0; kein lokaler E20-Response |
-| Plattform | `robozone`, frühere Cloud-Untersuchung laut Auftrag | Kein E20-JSON-Beleg; `platform` ist die bisherige lokale Parserstruktur, keine durch die Referenz belegte Feldzuordnung |
-| Stationstyp | `dust_station`, frühere Cloud-Untersuchung laut Auftrag | Ursprünglicher JSON-Pfad nicht belegt; separate Metainformation |
-| Steuerplugin | `T0xB8_750Y0015.zip`, frühere Cloud-Untersuchung laut Auftrag | `panel.name` bzw. `product.plugin.name` als Struktur in `coordinator.py`; E20-Plugin selbst nicht lokal analysiert |
-| Pluginversion | `2.5.4`, frühere Cloud-Untersuchung laut Auftrag | `versionName` als Struktur in `coordinator.py`; E20-Wert nicht lokal belegt |
-| SN8 | Unbekannt | Nur Referenzwerte `610VR510`, `620VR520`, `9A0VR870` in `const.py`; keine davon wird dem E20 zugewiesen |
+| Cache-Feld unter `geraete[0].roh` | Live bestätigter Wert |
+| --- | --- |
+| `product.productModel` | `E20 Evo Plus` |
+| `product.sn8` | `750Y0015` |
+| `product.protoVersion` | `0` |
+| `product.platform` | `robozone` |
+| `product.stationType` | `dust_station` |
+| `product.productName` | `Eureka_E20 Evo Plus_750Y0015` |
+| `product.plugin.name` und `panel.name` | `T0xB8_750Y0015.zip` |
+| `product.plugin.versionName` und `panel.versionName` | `2.5.4` |
 
-`tests/eureka/e20-fixture.php` rekonstruiert diese Angaben ausdrücklich als
-Testdatensatz, nicht als gespeicherten Cloud-Response. Produktkennung und
-Stationstyp stehen außerhalb der simulierten API-Daten. Geräte-ID und Zustand
-sind erfunden. Gemeinsame Nutzung in GET- und Integrationstests sichert Modellname,
-Konfigurator und den bestehenden Lesebetrieb ab; sie liefert keinen neuen E20-Beleg.
+`750Y0015` ist nachweislich die Produkt-SN8, keine individuelle Seriennummer.
+Es wird kein zusätzliches API-Feld für eine „Produktkennung“ eingeführt.
+`tests/eureka/e20-fixture.php` bildet diese verschachtelte Struktur anonymisiert
+ab. Geräte-ID und Zustand sind synthetisch; die Fixture ist kein Original-Export
+und kein Freigabeprofil. GET- und Integrationstests nutzen dieselbe Fixture.
 `x-platform: Android29` ist ein Client-Header und keine Geräteplattform.
 
 `T0xB8_…` zusammen mit expliziter Protokollversion `0` stützt die B8-Familie,
@@ -34,8 +37,9 @@ auch ohne SN8. Alternativ bleiben die drei belegten Referenz-SN8 mit Version 0
 Familienindizien. Ein vorhandenes fremdes oder ungültiges Plugin widerspricht der
 B8-Zuordnung und wird abgewiesen. Fehlende Versionen werden nicht ergänzt;
 widersprüchliche Werte in den unterstützten Metadatenpfaden werden abgewiesen.
+Auch ein Widerspruch zwischen Plugin-Suffix und angegebener SN8 blockiert.
 Eine Familienzuordnung ist niemals eine Gerätefreigabe. `pruefeZuordnung` verlangt
-weiterhin vollständige Identifikation inklusive separat belegter SN8 und eine
+weiterhin vollständige Identifikation inklusive SN8 und eine
 exakte Zuordnung mit Beleg. Die produktive Zuordnungstabelle bleibt leer.
 
 Die Referenz setzt fehlende SN8 auf `610VR510` und fehlende Versionen auf `0`;
@@ -59,7 +63,7 @@ Stationsfunktionen wie Absaugen. Die tatsächliche E20-Semantik bleibt offen.
 | `libs/RoboHubEureka.php` | Bestehender `RoboHubTreiber::befehl()`-Einstieg mit Sperre und vorbereitetem Anschluss an Transport/Token-Rückruf; zweite Sperre vor cURL |
 | `RoboHubKonto/module.php` | Bewahrt ausschließlich für Eureka vorhandene GET-Rohdaten mit Geräte-ID und Zeitstempel im Schnappschuss auf |
 | `tests/eureka/command-fixtures.php` | Simulierte Referenzzuordnung für Offline-Tests, kein produktives Geräteprofil |
-| `tests/eureka/e20-fixture.php` | Rekonstruierte E20-Metadaten mit Herkunft; keine erfundene SN8 oder API-Produktkennung |
+| `tests/eureka/e20-fixture.php` | Anonymisierte live bestätigte E20-Cachestruktur mit produktbezogener SN8 und Herkunft |
 | `tests/eureka/command-test.php` | Rahmen, Validierung, Zustand, Transportfehler, Einmaligkeit, beide Produktionssperren |
 | `tests/eureka/token-test.php` | Bestehende Token-Races plus Befehlsweg mit echter Konto-Persistierung und GET-Regressionen |
 | `.tools/test-eureka.inc.php` | Integration von Konto, Konfigurator und Gerät; Schnappschuss und unveränderte Lesefreigaben |
@@ -133,6 +137,41 @@ wiederholt den POST. Meldungen enthalten keinen Cloud-Freitext, Token oder
 ungeschützte Transport-Ausnahme. Jede Befehlsweg-Instanz wird vor ihrem einzigen
 Transportaufruf verbraucht, auch bei Reentranz, Timeout oder Fehlern.
 
+## Gerätebezogene Serialisierung
+
+`ausfuehren()` erwirbt `IPS_SemaphoreEnter` mit 1 ms Wartezeit. Der globale
+Schlüssel `RoboHubEureka_Geraet_` plus SHA-256 über den festen EU-/robozone-Namensraum
+und die validierte Cloud-Geräte-ID hängt weder von Token, Konto-Instanz noch
+Befehlsobjekt ab. Dasselbe Gerät wird daher auch über mehrere Konten serialisiert;
+unterschiedliche Geräte haben getrennte Sperren. Schlüssel und IDs werden nicht
+protokolliert. Ohne native Semaphore-Funktionen oder bei belegter Sperre wird
+vor jedem Transport abgebrochen, ohne Warteschlange oder automatische Wiederholung.
+
+Innerhalb von `try/finally` liest der produktive Konto-Rückruf ausschließlich
+lokale Attribute erneut: Hersteller, Token-Bündel mit Sitzungsrevision,
+Gerätecache und Schnappschuss. Entfernte Geräte werden ohne Cloud-Nachladen
+abgewiesen. Gerätebindung, exakte Befehlszuordnung, Zustand, Aktualität und Token
+werden erst danach für den Versand geprüft. Der produktive Treiber verlangt
+diesen Rückruf; Offline-Tests können statische Snapshots verwenden. Der Rückruf
+wird pro Treiber erzeugt; seine gemerkte Sitzung muss beim Aufruf noch gelten.
+
+Die Gerätesperre umfasst den POST, Antwortparser und gegebenenfalls den zentralen
+401-Refresh; Reihenfolge: Gerätesperre → Konto-Refresh → kurze Bündelsperre.
+Es gibt keinen Pfad, der unter einer Kontosperre eine Gerätesperre erwirbt.
+`finally` gibt jede erworbene Gerätesperre auch bei Kontextfehlern, Transportfehler,
+Geräte-Timeout, ungültiger Antwort oder fehlgeschlagenem Refresh frei. Die
+Verbrauchsmarkierung verhindert weiterhin einen zweiten POST desselben Versuchs.
+Ein späterer ausdrücklich neuer Versuch bleibt möglich; es gibt keine globale
+Idempotenzgarantie für nacheinander eingehende Anforderungen.
+
+Der deterministische Fiber-Test hält einen simulierten POST an, startet eine
+zweite unabhängige Befehlsinstanz für dasselbe Gerät (abgewiesen, kein zweiter
+POST) und eine dritte für ein anderes Gerät (eigener POST vor Freigabe des ersten).
+Zusätzliche Tests ändern den Kontext nach Sperrerwerb und prüfen sämtliche
+Fehlerpfade auf Freigabe. Die Kontotests verwenden den echten Attribut-Rückruf
+und prüfen auch Abmeldung, neue Sitzung mit identischen Tokens, entfernte Geräte
+und Timeout der Bündelsperre, jeweils ohne Cloud-Aufruf.
+
 ## Technisch erzwungene Sperren und Grenzen
 
 1. `RoboHubEureka::befehl()` ist final und prüft eine private, feste Freigabe `false`.
@@ -147,20 +186,19 @@ generischen Steuerflächen erhalten weiterhin die Sperrmeldung. Die Tests nutzen
 einen separaten injizierten Fixture-Transport; es gibt keinen Simulationsschalter,
 der den echten Adapter zur Laufzeit freischalten könnte.
 
-Offene Risiken vor einer späteren Aktivierung: lokaler Beleg der E20-Familie,
-SN8, Original-JSON-Feldzuordnung, Analyse des Plugins 2.5.4, Zustandssemantik, Parameterwerte und reales
-Antwortformat; native IP-Symcon-9.1-Laufzeit; Verzögerung des Cloud-Schattens und
-Zustandsänderung zwischen Lesen und Befehl. Ein frischer Schnappschuss ist keine
-atomare Gerätegarantie. Die Einmaligkeit gilt pro Befehlsversuch; für eine spätere
-breite Produktivbedienung ist eine gerätebezogene persistente Sperre gegen
-parallele unabhängige Anforderungen zusätzlich zu prüfen. Aktuell verhindern die
-Produktionssperren sämtliche solchen Versände. Die Hersteller-App wurde weder
-angesprochen noch verändert; ihr reales Parallelverhalten wurde nicht getestet.
+Offene Risiken vor einer späteren Aktivierung: Analyse des Plugins 2.5.4,
+E20-Zustandssemantik, Parameterwerte und reales Antwortformat; native
+IP-Symcon-9.1-Laufzeit einschließlich Semaphoren über unabhängige Skripte.
+Die Metadaten bestätigen die B8-Familie, keine Befehlsfreigabe.
+Ein frischer Schnappschuss ist keine atomare Gerätegarantie: Cloud-Schatten,
+Hersteller-App und externe Clients liegen außerhalb der lokalen Sperre.
+Die Sperre gilt innerhalb einer IP-Symcon-Laufzeit, nicht über mehrere Server.
+Das reale Parallelverhalten der Hersteller-App wurde nicht getestet.
 
 ## Minimaler Plan für einen später einzeln freigegebenen Live-Befehl
 
-1. Zuerst vorhandene echte Metadaten und das passende App-Steuerplugin lokal
-   belegen; exakte Gerätezuordnung und den vorgesehenen Rahmen separat reviewen.
+1. Zuerst das passende App-Steuerplugin 2.5.4 lokal analysieren und die
+   bestätigten Metadaten beim Review berücksichtigen; exakte Gerätezuordnung und den vorgesehenen Rahmen separat reviewen.
    Keine Aktivierung nur aufgrund von `750Y0015` oder eines Referenz-SN8.
 2. Spätere ausdrückliche Freigabe auf **genau einen Pause-Befehl an das separat bestätigte Testgerät**
    begrenzen, während eine über die Original-App begonnene Reinigung vor Ort
