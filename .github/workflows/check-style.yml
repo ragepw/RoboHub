@@ -16,3 +16,5 @@ jobs:
         run: find . -name "*.php" -print0 | xargs -0 -n1 php -l
       - name: Prüfstand (ohne Symcon, ohne Netz)
         run: php .tools/test-robohub.php
+      - name: Eureka Token-Tests (ohne Symcon, ohne Netz)
+        run: php tests/eureka/token-test.php

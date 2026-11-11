@@ -71,6 +71,8 @@ while (time() < $schluss) {
     $ende = microtime(true) + 5;
     $fertig = false;
     while (!$fertig && microtime(true) < $ende) {
+        // Steuerdateien werden vom Prüfprozess geändert, also Stat-Cache je Paket leeren.
+        clearstatcache();
         foreach (RoboHubMqtt::zerlegen($puffer) as $p) {
             if ($p['typ'] === RoboHubMqtt::CONNECT) {
                 // Kopf 10 Bytes, dann Client-ID (Länge + Text) — sie muss die BLID sein (roombapy identifier=blid).

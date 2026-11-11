@@ -1922,6 +1922,8 @@ usort($keys, 'version_compare');
 check('höchster News-Eintrag = library.json-Version', end($keys) === $lib['version']);
 check('library.json nur Store-Felder', array_keys($lib) === ['id', 'author', 'name', 'url', 'compatibility', 'version', 'build', 'date']);
 
+require __DIR__ . '/test-eureka.inc.php';
+
 abschnitt('Vertragshygiene');
 foreach (['RoboHubKonto', 'RoboHubGeraet', 'RoboHubKonfigurator'] as $klasse) {
     foreach ((new ReflectionClass($klasse))->getMethods(ReflectionMethod::IS_PUBLIC) as $m) {

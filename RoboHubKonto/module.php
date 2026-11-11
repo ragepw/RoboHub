@@ -8,6 +8,7 @@ require_once __DIR__ . '/../libs/RoboHubDreame.php';
 require_once __DIR__ . '/../libs/RoboHubMqttSitzung.php';
 require_once __DIR__ . '/../libs/RoboHubTls.php';
 require_once __DIR__ . '/../libs/RoboHubRoborock.php';
+require_once __DIR__ . '/../libs/RoboHubEureka.php';
 require_once __DIR__ . '/../libs/RoboHubWorx.php';
 require_once __DIR__ . '/../libs/RoboHubEcovacs.php';
 require_once __DIR__ . '/../libs/RoboHubIrobot.php';
@@ -60,6 +61,7 @@ class RoboHubKonto extends IPSModule
         'dreame'    => ['Dreame (app "Dreamehome")', 'Dreame', false, true],
         'mova'      => ['MOVA (app "MOVAhome")', 'MOVA', false, true],
         'roborock'  => ['Roborock (app "Roborock")', 'Roborock', true, false],
+        'eureka'    => ['Eureka (app "Eureka Robot")', 'Eureka', false, true],
         'worx'      => ['Worx Landroid (app "Landroid")', 'Worx', false, false],
         'kress'     => ['Kress (app "Kress Mission")', 'Kress', false, false],
         'landxcape' => ['LandXcape (app "LandXcape")', 'LandXcape', false, false],
@@ -117,6 +119,7 @@ class RoboHubKonto extends IPSModule
         $this->RegisterPropertyString('ClientSecret', '');
 
         $this->RegisterAttributeString('Buendel', '');
+        $this->RegisterAttributeString('BuendelRevision', '');
         // Zweistufige Anmeldung (Ecovacs-Gerätebestätigung): Zwischenstand bis zum Code.
         $this->RegisterAttributeString('AnmeldeVorstufe', '');
         $this->RegisterAttributeString('Geraete', '[]');
@@ -245,11 +248,13 @@ class RoboHubKonto extends IPSModule
             $treiber->zusatz = ['clientId' => (string)$this->ReadPropertyString('ClientId'), 'clientSecret' => (string)$this->ReadPropertyString('ClientSecret'), 'ip' => (string)$this->ReadPropertyString('MaeherIP')];
         }
         try {
+            $sitzung = $this->buendelStand();
             if ($vorstufe !== [] && method_exists($treiber, 'anmeldenMitCode')) {
                 $buendel = $treiber->anmeldenMitCode($konto, $pass, $vorstufe);
             } else {
                 $buendel = $treiber->anmelden($konto, $pass, (string)$this->ReadPropertyString('Region'));
             }
+            $this->buendelSpeichern((string)json_encode($buendel), $sitzung);
         } catch (Throwable $e) {
             $this->WriteAttributeString('LetzterFehler', $e->getMessage());
             $this->protokolliere(RoboHubText::t('Sign-in failed: %s', $e->getMessage()), KL_WARNING);
@@ -265,7 +270,6 @@ class RoboHubKonto extends IPSModule
             return $this->melde(RoboHubText::t('⛔ Sign-in failed: %s', $e->getMessage()));
         }
         $this->WriteAttributeString('AnmeldeVorstufe', '');
-        $this->WriteAttributeString('Buendel', (string)json_encode($buendel));
         $this->WriteAttributeString('LetzterFehler', '');
         $this->WriteAttributeInteger('WarteBis', 0);
 
@@ -305,13 +309,14 @@ class RoboHubKonto extends IPSModule
     private function koppeln($treiber, string $ip): string
     {
         try {
-            $buendel = $treiber->koppeln($ip, json_decode((string)$this->ReadAttributeString('Buendel'), true) ?: []);
+            $sitzung = $this->buendelStand();
+            $buendel = $treiber->koppeln($ip, json_decode($sitzung[0], true) ?: []);
+            $this->buendelSpeichern((string)json_encode($buendel), $sitzung);
         } catch (Throwable $e) {
             $this->WriteAttributeString('LetzterFehler', $e->getMessage());
             $this->protokolliere(RoboHubText::t('Pairing failed: %s', $e->getMessage()), KL_WARNING);
             return $this->melde(RoboHubText::t('⛔ Pairing failed: %s', $e->getMessage()));
         }
-        $this->WriteAttributeString('Buendel', (string)json_encode($buendel));
         $this->WriteAttributeString('LetzterFehler', '');
         $text = method_exists($treiber, 'koppelText') ? $treiber->koppelText()
             : RoboHubText::t('✅ Paired. The device password and the fingerprint of the robot\'s certificate are stored; a device with a different certificate will be rejected from now on.');
@@ -361,7 +366,11 @@ class RoboHubKonto extends IPSModule
     /** ROBOHUB_Abmelden($id): string — verwirft den Zugangsschlüssel. */
     public function Abmelden(): string
     {
-        $this->WriteAttributeString('Buendel', '');
+        try {
+            $this->buendelSpeichern('');
+        } catch (RoboHubFehler $e) {
+            return $this->melde($e->getMessage());
+        }
         $this->WriteAttributeString('AnmeldeVorstufe', '');
         $this->WriteAttributeString('Geraete', '[]');
         $this->WriteAttributeInteger('GeraeteStand', 0);
@@ -494,6 +503,10 @@ class RoboHubKonto extends IPSModule
         // Letzter vollständiger Rohstand (z. B. für die Mopp-Anhebungs-Erkennung bei Raum-Einstellungen).
         $geraet['stand'] = (array)((json_decode((string)$this->ReadAttributeString('Schnappschuss'), true) ?: [])[(string)$geraet['id']]['p'] ?? []);
         $buendel = $this->gueltigesBuendel();
+        $sitzung = $this->buendelStand();
+        if ((json_decode($sitzung[0], true) ?: []) !== $buendel) {
+            throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
+        }
         try {
             if ($aktion === 'zustand') {
                 return $this->zustandMitBlockSperre($buendel, $geraet);
@@ -516,7 +529,7 @@ class RoboHubKonto extends IPSModule
                 return $this->treiber()->befehl($buendel, $geraet, (string)($anfrage['Befehl'] ?? ''), (array)($anfrage['Parameter'] ?? []));
             }
         } catch (RoboHubFehler $e) {
-            $this->verarbeiteFehler($e);
+            $this->verarbeiteFehler($e, $this->ReadPropertyString('Hersteller') === 'eureka' ? null : $sitzung);
             throw $e;
         }
         throw new RoboHubFehler(RoboHubText::t('Unknown action: %s', $aktion));
@@ -1022,6 +1035,11 @@ class RoboHubKonto extends IPSModule
     protected function treiber(): RoboHubTreiber
     {
         $treiber = $this->treiberNeu();
+        if ($treiber instanceof RoboHubEureka) {
+            $treiber->beiUnauthorized = function (string $access): array {
+                return $this->gueltigesBuendel($access);
+            };
+        }
         if (property_exists($treiber, 'echtzeitVerbunden')) {
             // Mit laufender Echtzeit reicht ein seltener Vollabruf (Anfragelimit der Hersteller).
             $treiber->echtzeitVerbunden = (json_decode((string)$this->ReadAttributeString('Mqtt'), true)['zustand'] ?? '') === 'verbunden';
@@ -1037,6 +1055,8 @@ class RoboHubKonto extends IPSModule
         $hersteller = (string)$this->ReadPropertyString('Hersteller');
         if ($hersteller === 'roborock') {
             $treiber = new RoboHubRoborock();
+        } elseif ($hersteller === 'eureka') {
+            $treiber = new RoboHubEureka();
         } elseif (isset(RoboHubWorx::MARKEN[$hersteller])) {
             $treiber = new RoboHubWorx($hersteller);
         } elseif ($hersteller === 'ecovacs') {
@@ -1076,50 +1096,95 @@ class RoboHubKonto extends IPSModule
         return $treiber;
     }
 
-    /** Liefert ein gültiges (ggf. frisch erneuertes) Bündel oder wirft. */
-    private function gueltigesBuendel(): array
+    /** Kurze Attributsperre; niemals Cloud- oder Echtzeit-Aufrufe darin ausführen.
+     * Reihenfolge: Refresh-Sperre → Attributsperre, nie umgekehrt.
+     */
+    private function mitBuendelSperre(callable $aktion)
     {
-        $roh = $this->ReadAttributeString('Buendel');
-        if ($roh === '') {
-            throw new RoboHubFehler(RoboHubText::t('Not signed in — please sign in in the account instance.'));
+        $sem = 'RoboHubKonto_Buendel_' . $this->InstanceID;
+        if (!IPS_SemaphoreEnter($sem, 10000)) {
+            throw new RoboHubFehler(RoboHubText::t('Token storage is busy. Please try again.'));
         }
+        try {
+            return $aktion();
+        } finally {
+            IPS_SemaphoreLeave($sem);
+        }
+    }
+
+    private function buendelStand(): array
+    {
+        return $this->mitBuendelSperre(fn(): array => [
+            $this->ReadAttributeString('Buendel'), $this->ReadAttributeString('BuendelRevision'),
+        ]);
+    }
+
+    /** Vergleich und Schreiben sind atomar, auch bei identischen Tokens einer Neuanmeldung. */
+    private function buendelSpeichern(string $roh, ?array $erwartet = null): void
+    {
+        $this->mitBuendelSperre(function () use ($roh, $erwartet): void {
+            if ($erwartet !== null && $erwartet !== [
+                $this->ReadAttributeString('Buendel'), $this->ReadAttributeString('BuendelRevision'),
+            ]) {
+                throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
+            }
+            $revision = bin2hex(random_bytes(16));
+            $this->WriteAttributeString('BuendelRevision', $revision);
+            $this->WriteAttributeString('Buendel', $roh);
+        });
+    }
+
+    /** Liefert ein gültiges (ggf. frisch erneuertes) Bündel oder wirft. */
+    private function gueltigesBuendel(?string $abgelehnterAccess = null): array
+    {
         $warte = $this->ReadAttributeInteger('WarteBis');
         if ($warte > time()) {
             throw new RoboHubFehler(RoboHubText::t('The vendor cloud is throttling right now — next attempt from %s.', date('d.m.Y H:i', $warte)));
         }
-        $buendel = json_decode($roh, true) ?: [];
-
-        // Nur ein Prozess darf gleichzeitig erneuern (mehrere Roboter
-        // fragen im selben Takt an).
         $sem = 'RoboHubKonto_' . $this->InstanceID;
-        $gesperrt = IPS_SemaphoreEnter($sem, 10000);
-        try {
-            // Nach dem Warten neu lesen — ein anderer Prozess kann schon erneuert haben.
-            $buendel = json_decode((string)$this->ReadAttributeString('Buendel'), true) ?: $buendel;
-            $neu = $this->treiber()->erneuern($buendel);
-            if ($neu !== $buendel) {
-                $this->WriteAttributeString('Buendel', (string)json_encode($neu));
-                if (($neu['access_token'] ?? '') !== ($buendel['access_token'] ?? '')) {
-                    // Echtzeit-Anmeldung nutzt den Zugangsschlüssel → neu verbinden.
-                    $this->echtzeitKonfigurieren(true);
-                } elseif (($neu['token'] ?? '') !== ($buendel['token'] ?? '') && $this->echtzeitArt() === 'websocket') {
-                    // WebSocket-Anmeldekopf trägt den Zugangsschlüssel → kurz danach mit neuem Kopf verbinden.
-                    $this->SetTimerInterval('Verbindung', 2000);
-                }
-            }
-            if ($this->ReadAttributeString('LetzterFehler') !== '') {
-                $this->WriteAttributeString('LetzterFehler', '');
-                $this->aktualisiereStatus();
-            }
-            return $neu;
-        } catch (RoboHubFehler $e) {
-            $this->verarbeiteFehler($e);
-            throw $e;
-        } finally {
-            if ($gesperrt) {
-                IPS_SemaphoreLeave($sem);
-            }
+        if (!IPS_SemaphoreEnter($sem, 10000)) {
+            throw new RoboHubFehler(RoboHubText::t('Token renewal is busy. Please try again.'));
         }
+        try {
+            $sitzung = $this->buendelStand();
+            if ($sitzung[0] === '') {
+                throw new RoboHubFehler(RoboHubText::t('Not signed in — please sign in in the account instance.'));
+            }
+            $buendel = json_decode($sitzung[0], true) ?: [];
+            $treiber = $this->treiber();
+            $erzwingen = $abgelehnterAccess !== null &&
+                ($buendel['access_token'] ?? '') === $abgelehnterAccess;
+            try {
+                $neu = $treiber instanceof RoboHubEureka
+                    ? $treiber->erneuern($buendel, $erzwingen)
+                    : $treiber->erneuern($buendel);
+            } catch (RoboHubFehler $e) {
+                if ($this->buendelStand() !== $sitzung) {
+                    throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
+                }
+                $this->verarbeiteFehler($e, $sitzung);
+                throw $e;
+            }
+            // Auch unveränderte Ergebnisse dürfen keine inzwischen beendete Sitzung liefern.
+            if ($neu !== $buendel) {
+                $this->buendelSpeichern((string)json_encode($neu), $sitzung);
+            } elseif ($this->buendelStand() !== $sitzung) {
+                throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
+            }
+        } finally {
+            IPS_SemaphoreLeave($sem);
+        }
+        // Echtzeit kann selbst Tokens abfragen: erst nach Freigabe aller Sperren.
+        if (($neu['access_token'] ?? '') !== ($buendel['access_token'] ?? '')) {
+            $this->echtzeitKonfigurieren(true);
+        } elseif (($neu['token'] ?? '') !== ($buendel['token'] ?? '') && $this->echtzeitArt() === 'websocket') {
+            $this->SetTimerInterval('Verbindung', 2000);
+        }
+        if ($this->ReadAttributeString('LetzterFehler') !== '') {
+            $this->WriteAttributeString('LetzterFehler', '');
+            $this->aktualisiereStatus();
+        }
+        return $neu;
     }
 
     /**
@@ -1163,14 +1228,15 @@ class RoboHubKonto extends IPSModule
         return $daten;
     }
 
-    private function verarbeiteFehler(RoboHubFehler $e): void
+    private function verarbeiteFehler(RoboHubFehler $e, ?array $sitzung = null): void
     {
+        // Eureka-Auth-Fehler werden nur am zentralen Refresh-Schreibpfad invalidiert.
+        if ($e->anmeldungNoetig && $sitzung !== null) {
+            $this->buendelSpeichern('', $sitzung);
+        }
         $this->WriteAttributeString('LetzterFehler', $e->getMessage());
         if ($e->warteSekunden > 0) {
             $this->WriteAttributeInteger('WarteBis', time() + $e->warteSekunden);
-        }
-        if ($e->anmeldungNoetig) {
-            $this->WriteAttributeString('Buendel', '');
         }
         $this->protokolliere($e->getMessage(), KL_WARNING);
         $this->aktualisiereStatus();
@@ -1178,10 +1244,14 @@ class RoboHubKonto extends IPSModule
 
     private function ladeGeraete(array $buendel): array
     {
+        $sitzung = $this->buendelStand();
+        if ((json_decode($sitzung[0], true) ?: []) !== $buendel) {
+            throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
+        }
         try {
             $geraete = $this->treiber()->geraete($buendel);
         } catch (RoboHubFehler $e) {
-            $this->verarbeiteFehler($e);
+            $this->verarbeiteFehler($e, $this->ReadPropertyString('Hersteller') === 'eureka' ? null : $sitzung);
             throw $e;
         }
         $this->WriteAttributeString('Geraete', (string)json_encode($geraete));
