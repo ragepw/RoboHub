@@ -4,6 +4,7 @@ Alle automatischen Eureka-Prüfungen laufen ohne Hersteller-Cloud:
 
 ```sh
 php tests/eureka/command-test.php
+php tests/eureka/state-test.php
 php tests/eureka/token-test.php
 php .tools/test-robohub.php
 find . -name '*.php' -print0 | xargs -0 -n1 php -l
@@ -19,7 +20,39 @@ ab: `product.sn8=750Y0015`, verschachteltes `product.plugin` und `panel` Version
 2.5.4. IDs und Statuswerte sind erfunden. `command-fixtures.php` enthält nur eine
 simulierte Referenzzuordnung, kein produktives Geräteprofil.
 
-## Aktueller lokaler Prüfstand (11.11.2026, Basis bb8a926)
+## Statuskorrektur nach statischer Pluginanalyse (11.11.2026, Basis 124a86f)
+
+[Zustands- und Protokollbericht](../../docs/eureka-zustaende.md): konkrete
+Shadow-Unterzustände vor Sammelgruppen, strenge Zielzuordnung, Erreichbarkeit nur
+aus booleschem Shadow-`connected` mit konservativem Cache-Veto, Rohfehlererhalt
+und getrennte B8-Offline-Auswertung. `state-test.php` prüft die vollständige
+Shadow-/Parent-Matrix auch am Befehlsplaner, alle 256 B8-Arbeitsbytes und
+Schlafuntertypen sowie beide Abfragerahmen als Daten. Keine aktive Abfrage.
+
+Prüfung mit PHP 8.2.35; alle vier Laufzeitprüfstände unter
+`bwrap --unshare-net --dev-bind / / -- …` ohne externe Netzwerkverbindung:
+
+- Zustandsprüfungen: **575 bestanden, 0 Fehler**.
+- Befehlsprüfungen: **233 bestanden, 0 Fehler**.
+- Token-/GET-Prüfungen: **72 bestanden, 0 Fehler**.
+- RoboHub-Gesamtprüfstand: **1.151 bestanden, 0 Fehler**.
+- PHP-Lint: **66 Dateien ohne Syntaxfehler**; `git diff --check` fehlerfrei.
+
+Die Geräteintegration prüft Zustand, Erreichbarkeit, Rohzustand, Fehler,
+Schnappschuss, 30-Sekunden-/Basistakt und weiter gesperrte Befehle. Tokenlogik,
+Timerimplementierung, Modul-IDs und Variablentypen bleiben erhalten.
+`on_station` erlaubt mangels eindeutigen Befunds keinen vorbereiteten Neustart
+mehr. Fehlendes Shadow-`connected` oder fehlende Fehlerentwarnung sperren
+ebenfalls. Produktionsfreigabe false, produktive Zuordnung leer und
+Transportsperre vor cURL bleiben erhalten. Kein Commit, Push oder Deployment.
+
+Grenzen: Die Shadow-Namen sind Referenzwissen, die E20-Cloudkombinationen wurden
+nicht live beobachtet. Ohne belegten Gerätezeitstempel ist die Gerätefrische
+unbekannt; ein aktueller GET-Empfang beweist sie nicht. Symcon und Roboter wurden
+ausschließlich lokal nachgebildet. `32 01` und `32 06` benötigen für diese
+Korrektur keinen zusätzlichen aktiven Transport. Historische Ergebnisse folgen.
+
+## Früherer lokaler Prüfstand (11.11.2026, Basis bb8a926)
 
 Die drei Prüfstände laufen auf `codex-dev` mit
 `bwrap --unshare-net --dev-bind / / -- …`. Externe Netzzugriffe sind damit
@@ -61,7 +94,11 @@ Erst nach gesonderter Freigabe in einer Testinstanz mit diesem Arbeitsstand test
 4. Automatische Erneuerung beobachten. Anschließend Abmeldung und erneute Anmeldung kontrolliert prüfen: kein Wiedererscheinen eines alten Token-Bündels. Keine Token-Inhalte in Screenshots oder Logs übernehmen.
 5. Start, Pause, Docking, Wartungsreset und Kartensteuerung nicht verwenden. Die Eureka-Steuerpfade bleiben gesperrt. Firmware und Hersteller-App bleiben unverändert.
 
-Die Statusabbildung ist noch begrenzt: `cleaning` und `sleep` sind zugeordnet; andere Zustände bleiben unbekannt. Ein erfolgreicher Offline-Prüfstand ersetzt nicht die Prüfung der IP-Symcon-Laufzeit, des echten Cloud-Protokolls und der weiteren App-Zustände. Ein Timeout beim Speichern einer Cloud-Rotation kann eine erneute Anmeldung erfordern; veraltete Ergebnisse werden dabei niemals gespeichert.
+Die Statusabbildung wurde inzwischen anhand der statischen Pluginanalyse erweitert,
+siehe aktueller Prüfstand oben. Ein erfolgreicher Offline-Prüfstand ersetzt nicht
+die Prüfung der IP-Symcon-Laufzeit und des echten Cloud-Protokolls. Ein Timeout
+beim Speichern einer Cloud-Rotation kann eine erneute Anmeldung erfordern;
+veraltete Token-Ergebnisse werden dabei niemals gespeichert.
 
 ## Prüfergebnis dieses Arbeitsstands (11.11.2026)
 

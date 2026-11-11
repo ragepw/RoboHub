@@ -7,6 +7,7 @@ abschnitt('Eureka: Integration im Lesebetrieb');
 class IntegrationEureka extends RoboHubEureka
 {
     public array $pfade = [];
+    public ?array $shadow = null;
     protected function transport(string $method, string $path, string $token = '', ?array $body = null): array
     {
         $this->pfade[] = [$method, explode('?', $path)[0]];
@@ -14,7 +15,7 @@ class IntegrationEureka extends RoboHubEureka
         $data = match (explode('?', $path)[0]) {
             '/auth/login/email-password' => ['accessToken' => 'offline.' . $payload . '.fixture', 'refreshToken' => 'offline-refresh'],
             '/app/devices' => [e20Fixture()['geraet']['roh']],
-            '/shadow/device/state' => [e20Fixture()['geraet']['stand']['roh']],
+            '/shadow/device/state' => [$this->shadow ?? e20Fixture()['geraet']['stand']['roh']],
             default => throw new RuntimeException('Unerwarteter Offline-Transport.'),
         };
         return ['status' => 200, 'response' => json_encode(['errorCode' => 0, 'data' => $data])];
@@ -69,7 +70,35 @@ try {
         && abs(time() - $es['zeit']) < 5 && ($es['roh']['state'] ?? '') === 'cleaning'
         && ($es['roh']['batteryLevel'] ?? null) === 87);
     check('Lesebetrieb gibt weiterhin keine Eureka-Einstellungen frei', $eg->ReadAttributeString('Schreibbar') === '[]'
-        && $et->normalisiere('E20 Evo Plus', ['state' => 'pause'])['werte']['Zustand'] === RoboHubModell::ZUSTAND_UNBEKANNT);
+        && $et->normalisiere('E20 Evo Plus', ['state' => 'pause'])['werte']['Zustand'] === RoboHubModell::ZUSTAND_PAUSIERT);
+    check('Eureka-Statusabruf und Token-Erneuerung behalten ihre Timer', $eg->timers['Abruf'] === 30000
+        && ($ek->timers['Erneuern'] ?? 0) > 0);
+    foreach ([['pause', 'cleaning', 2, 120000], ['charging_back', 'cleaning', 3, 30000],
+        ['charging', 'sleep', 4, 120000], ['charging_finish', 'sleep', 5, 120000],
+        ['sleep', '', 8, 120000], ['stop', '', 0, 120000], ['unknown', 'cleaning', -1, 120000],
+        ['error', 'cleaning', 7, 120000]] as [$state, $parent, $expected, $timer]) {
+        $et->shadow = ['state' => $state, 'parentState' => $parent, 'batteryLevel' => 87,
+            'connected' => true, 'deviceFault' => []];
+        $eg->Aktualisieren();
+        check('Eureka-Variablen und automatischer Takt: ' . $state,
+            variable(9601, 'Zustand')['value'] === $expected && variable(9601, 'Erreichbar')['value'] === true
+            && variable(9601, 'Akku')['value'] === 87 && $eg->timers['Abruf'] === $timer
+            && variable(9601, 'ZustandRoh')['value'] === $state . ' / ' . $parent
+            && $eg->ReadAttributeString('Schreibbar') === '[]');
+    }
+    $et->shadow = ['state' => 'pause', 'parentState' => 'cleaning', 'deviceFault' => ['class' => 3, 'code' => 1]];
+    $eg->Aktualisieren();
+    $offlineStand = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'];
+    check('Fehlendes connected bleibt unerreichbar, Warnung bleibt erhalten und Stand sperrt Befehle',
+        variable(9601, 'Erreichbar')['value'] === false && variable(9601, 'Zustand')['value'] === 2
+        && json_decode(variable(9601, 'Fehler')['value'], true) === ['class' => 3, 'code' => 1]
+        && $offlineStand['online'] === false && $offlineStand['statusquelle']['quelle'] === 'shadow-get'
+        && $offlineStand['statusquelle']['geraetezeit'] === null && !array_key_exists('connected', $offlineStand['roh']));
+    $et->shadow = ['state' => 'unknown', 'parentState' => 'cleaning', 'connected' => false];
+    $eg->Aktualisieren();
+    check('Unbekannter neuer Status ersetzt Pause und alte Fehlermeldung', variable(9601, 'Zustand')['value'] === -1
+        && variable(9601, 'Fehler')['value'] === 'Unbekannt' && variable(9601, 'Erreichbar')['value'] === false
+        && $eg->timers['Abruf'] > 0 && $eg->ReadAttributeString('Schreibbar') === '[]');
     $vorher = count($et->pfade);
     $blockiert = json_decode($ek->ForwardData(json_encode(['Aktion' => 'befehl', 'Geraet' => 'offline-e20', 'Befehl' => 'start'])), true);
     check('Steuerbefehle werden ohne Cloud-Aufruf abgelehnt', !$blockiert['ok'] && count($et->pfade) === $vorher);

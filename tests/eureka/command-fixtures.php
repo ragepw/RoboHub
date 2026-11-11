@@ -28,7 +28,7 @@ function commandDevice(string $state = 'stop'): array
             'panel' => ['name' => 'T0xB8_610VR510', 'versionName' => '2.2.46'],
         ],
         'stand' => ['deviceId' => 'offline-command-device', 'zeit' => COMMAND_NOW,
-            'roh' => ['state' => $state, 'deviceFault' => []]],
+            'roh' => ['state' => $state, 'deviceFault' => [], 'connected' => true]],
     ];
 }
 function commandMappings(): array

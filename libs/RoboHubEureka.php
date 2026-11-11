@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/RoboHubModell.php';
 require_once __DIR__ . '/RoboHubEurekaBefehlsweg.php';
+require_once __DIR__ . '/RoboHubEurekaZustand.php';
 
 /**
  * Eureka / MZ-Robo Cloud
@@ -260,7 +261,7 @@ class RoboHubEureka implements RoboHubTreiber
                     $g['product']['productModel'] ?? 'Eureka'
                 ),
                 'klasse' => RoboHubModell::KLASSE_SAUGER,
-                'online' => (bool)($g['connected'] ?? false),
+                'online' => RoboHubEurekaZustand::verbunden($g) === true,
                 'roh' => $g,
             ];
         }
@@ -275,20 +276,24 @@ class RoboHubEureka implements RoboHubTreiber
             $buendel
         );
 
-        $p = $result[0] ?? $result;
-
-        if (!is_array($p)) {
-            throw new RoboHubFehler(
-                'Eureka: Kein gültiger Gerätestatus.'
-            );
-        }
+        $p = RoboHubEurekaZustand::ziel($result, (string)$geraet['id']);
 
         $daten = $this->normalisiere(
             (string)($geraet['modell'] ?? ''),
             $p
         );
 
-        $daten['online'] = true;
+        // Der Gerätecache kann bis zu einer Stunde alt sein. Sein positives
+        // connected ist daher kein Ersatz für eine fehlende Shadow-Meldung.
+        // Ein explizites Nein im Cache bleibt ein konservatives Veto.
+        $verbunden = RoboHubEurekaZustand::verbunden($p);
+        $cache = is_array($geraet['roh'] ?? null)
+            ? RoboHubEurekaZustand::verbunden($geraet['roh']) : null;
+        $daten['online'] = $verbunden === true && $cache !== false;
+        $daten['erreichbarkeit'] = ['shadow' => $verbunden, 'geraetecache' => $cache,
+            'quelle' => 'shadow.connected', 'empfangen' => $this->jetzt()];
+        // Empfangszeit ist ausdrücklich keine bestätigte Gerätezeit.
+        $daten['statusquelle'] = ['quelle' => 'shadow-get', 'geraetezeit' => null];
         $daten['roh'] = $p;
 
         return $daten;
@@ -296,37 +301,39 @@ class RoboHubEureka implements RoboHubTreiber
 
     public function normalisiere(string $modell, array $p): array
     {
-        $state = (string)($p['state'] ?? '');
-        $parent = (string)($p['parentState'] ?? '');
-
-        $zustand = RoboHubModell::ZUSTAND_UNBEKANNT;
-
-        if ($state === 'cleaning' || $parent === 'cleaning') {
-            $zustand = RoboHubModell::ZUSTAND_REINIGT;
-        } elseif ($parent === 'sleep') {
-            $zustand = RoboHubModell::ZUSTAND_SCHLAF;
-        }
+        $bewertung = RoboHubEurekaZustand::shadow($p);
+        $state = $p['state'] ?? '';
+        $parent = $p['parentState'] ?? '';
+        // Das bisherige Textformat für gültige Strings erhalten. Ungültige
+        // Typen als JSON bewahren, statt sie zu "Array" oder "1" umzuwandeln.
+        $roh = is_string($state) && is_string($parent) ? $state . ' / ' . $parent :
+            json_encode(array_intersect_key($p, array_flip(['state', 'parentState'])),
+                JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 
         $daten = [
-            'Zustand' => $zustand,
-            'ZustandRoh' => $state . ' / ' . $parent,
-            'Akku' => isset($p['batteryLevel'])
-                ? (int)$p['batteryLevel'] : null,
+            'Zustand' => $bewertung['zustand'],
+            'ZustandRoh' => $roh,
+            'Akku' => is_int($p['batteryLevel'] ?? null) && $p['batteryLevel'] >= 0 && $p['batteryLevel'] <= 100
+                ? $p['batteryLevel'] : null,
         ];
 
-        if (isset($p['fanLevel'])) {
+        if (is_int($p['fanLevel'] ?? null) || is_string($p['fanLevel'] ?? null)) {
             $daten['Saugstufe'] = (string)$p['fanLevel'];
         }
 
-        if (isset($p['deviceFault']) &&
-            is_array($p['deviceFault']) &&
-            $p['deviceFault'] === []) {
-            $daten['Fehler'] = 'Keine Fehler';
+        if (array_key_exists('deviceFault', $p)) {
+            $daten['Fehler'] = $p['deviceFault'] === [] ? 'Keine Fehler' :
+                json_encode($p['deviceFault'], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        } else {
+            // Keine alte Entwarnung oder Fehlermeldung als aktuellen Befund behalten.
+            $daten['Fehler'] = 'Unbekannt';
         }
 
         // Fortschritt erst aktivieren, wenn dessen
         // Semantik am E20 Evo Plus nachgewiesen ist.
-        return ['werte' => $daten, 'optionen' => [], 'schreibbar' => []];
+        return ['werte' => $daten, 'optionen' => [], 'schreibbar' => [],
+            'online' => RoboHubEurekaZustand::verbunden($p) === true,
+            'zustandsbewertung' => $bewertung];
     }
 
     public function karte(array $buendel, array $geraet): array

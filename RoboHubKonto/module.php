@@ -1404,7 +1404,9 @@ class RoboHubKonto extends IPSModule
         if ($this->ReadPropertyString('Hersteller') === 'eureka') {
             // Nur vorhandene GET-Daten aufbewahren, keine zusätzliche Cloud-Abfrage.
             // Andere Hersteller behalten ihr bisheriges properties-Format.
-            $rohstand = ['deviceId' => $did, 'zeit' => $jetzt, 'roh' => (array)($daten['roh'] ?? [])];
+            $rohstand = ['deviceId' => $did, 'zeit' => $jetzt, 'roh' => (array)($daten['roh'] ?? []),
+                'online' => ($daten['online'] ?? false) === true,
+                'statusquelle' => $daten['statusquelle'] ?? null];
         }
         $this->schnappschussMerken($did, (string)($geraet['modell'] ?? ''), $rohstand);
 

@@ -18,3 +18,7 @@ jobs:
         run: php .tools/test-robohub.php
       - name: Eureka Token-Tests (ohne Symcon, ohne Netz)
         run: php tests/eureka/token-test.php
+      - name: Eureka Zustands- und Befehlstests (ohne Symcon, ohne Netz)
+        run: |
+          php tests/eureka/state-test.php
+          php tests/eureka/command-test.php

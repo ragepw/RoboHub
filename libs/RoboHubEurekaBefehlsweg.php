@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/RoboHubEurekaProtokoll.php';
+require_once __DIR__ . '/RoboHubEurekaZustand.php';
 
 /**
  * Ein einzelner Befehlsversuch. Besitzt selbst keinen Netzwerktransport.
@@ -34,7 +35,8 @@ final class RoboHubEurekaBefehlsweg
             ($stand['deviceId'] ?? null) !== $geraet['id'] ||
             !is_int($stand['zeit'] ?? null) || $stand['zeit'] > $jetzt || $jetzt - $stand['zeit'] > 120 ||
             !is_array($stand['roh'] ?? null) ||
-            (array_key_exists('connected', $stand['roh']) && $stand['roh']['connected'] !== true)) {
+            ($stand['roh']['connected'] ?? null) !== true ||
+            (array_key_exists('online', $stand) && $stand['online'] !== true)) {
             throw new RoboHubFehler('Eureka: Kein aktueller, zugeordneter Online-Zustand.');
         }
         $roh = $stand['roh'];
@@ -48,19 +50,17 @@ final class RoboHubEurekaBefehlsweg
             throw new RoboHubFehler('Eureka: Geräteidentifikation meldet kein verbundenes Gerät.');
         }
         $state = $roh['state'] ?? null;
-        $parent = $roh['parentState'] ?? null;
+        $bewertung = RoboHubEurekaZustand::shadow($roh);
         // charging_pause/wiping_pause können eine andere Wiederaufnahme erfordern.
         $gruppe = match ($state) {
             'cleaning' => 'cleaning',
             'pause' => 'paused',
             'stop' => 'idle',
-            'charging', 'charging_finish', 'on_station' => 'docked',
+            'charging', 'charging_finish' => 'docked',
             default => null,
         };
-        if ($gruppe === null || !in_array($parent, [null, '', $state, 'cleaning', 'sleep'], true) ||
-            ($parent === 'cleaning' && !in_array($gruppe, ['cleaning', 'paused'], true)) ||
-            ($parent === 'sleep' && !in_array($gruppe, ['idle', 'docked'], true)) ||
-            (isset($roh['deviceFault']) && $roh['deviceFault'] !== [])) {
+        if ($gruppe === null || !$bewertung['konsistent'] ||
+            !array_key_exists('deviceFault', $roh) || $roh['deviceFault'] !== []) {
             throw new RoboHubFehler('Eureka: Zustand unbekannt, widersprüchlich oder fehlerhaft.');
         }
         $aktion = $befehl;

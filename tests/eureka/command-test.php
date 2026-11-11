@@ -172,7 +172,7 @@ $tests['Pause wird fortgesetzt, ohne neue Saug- oder Wasserwerte'] = static func
     commandAssert($p['aktion'] === 'resume' && $p['body']['data'] === 'AA0DB800000000000002221C00FB');
     commandError(fn() => commandPlan($d));
 };
-foreach (['stop', 'charging', 'charging_finish', 'on_station'] as $state) {
+foreach (['stop', 'charging', 'charging_finish'] as $state) {
     $tests['Neustart aus ' . $state] = static fn() => commandAssert(commandPlan(commandDevice($state))['aktion'] === 'start');
 }
 $tests['Pause nur während Reinigung'] = static function (): void {
@@ -182,7 +182,7 @@ $tests['Pause nur während Reinigung'] = static function (): void {
 foreach (['cleaning', 'pause', 'stop'] as $state) {
     $tests['Station aus ' . $state] = static fn() => commandAssert(commandPlan(commandDevice($state), 'station', [])['body']['data'] === 'AA0DB80000000000000222010016');
 }
-foreach (['unknown', 'sleep', 'upgrading', 'charging_pause', 'wiping_pause', 'error', 'charging_back', 'positioning', ''] as $state) {
+foreach (['unknown', 'sleep', 'upgrading', 'charging_pause', 'wiping_pause', 'error', 'charging_back', 'positioning', 'on_station', ''] as $state) {
     foreach (['start', 'pause', 'resume', 'station'] as $cmd) {
         $tests['Keine riskante Entscheidung ' . $state . '/' . $cmd] = static fn() => commandError(fn() => commandPlan(commandDevice($state), $cmd, []));
     }

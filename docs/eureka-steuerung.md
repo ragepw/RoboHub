@@ -4,6 +4,12 @@ Stand: 11.11.2026, `codex-dev`, Branch `feature/eureka-e20-evo-plus`, Ausgangsco
 `bb8a926`. Ausschließlich Offline-Implementierung. Kein Zugriff auf produktive Konten,
 Geräte oder den produktiven IP-Symcon-Server; keine Cloud-Proben.
 
+Die anschließende statische E20-Prüfung und Statuskorrektur ist in
+[eureka-zustaende.md](eureka-zustaende.md) dokumentiert, einschließlich
+`32 01`/`32 06`, Antwortoffsets, konservativer Erreichbarkeit und Nachweisgrenzen.
+Die dortigen Statusregeln gelten für den aktuellen Stand; Produktivbefehle
+bleiben gesperrt.
+
 ## Gerätekompatibilität und Beleglage
 
 Die folgenden Metadaten sind laut Auftrag vom 11.11.2026 live im gespeicherten
@@ -61,14 +67,15 @@ Stationsfunktionen wie Absaugen. Die tatsächliche E20-Semantik bleibt offen.
 | `libs/RoboHubEurekaProtokoll.php` | Reine Funktionen `rahmen`, `pruefeRahmen`, `start`, `pause`, `fortsetzen`, `station`, `identifikation`, `referenzFamilie`, `pruefeZuordnung` |
 | `libs/RoboHubEurekaBefehlsweg.php` | Offline-Planung `vorbereiten`, eigener POST-Parser `antwortLesen`, einmaliger Versuch `ausfuehren`, Klartext-Vertrag `befehl`; Transport ausschließlich als Callback |
 | `libs/RoboHubEureka.php` | Bestehender `RoboHubTreiber::befehl()`-Einstieg mit Sperre und vorbereitetem Anschluss an Transport/Token-Rückruf; zweite Sperre vor cURL |
-| `RoboHubKonto/module.php` | Bewahrt ausschließlich für Eureka vorhandene GET-Rohdaten mit Geräte-ID und Zeitstempel im Schnappschuss auf |
+| `RoboHubKonto/module.php` | Bewahrt ausschließlich für Eureka vorhandene GET-Rohdaten mit Geräte-ID, lokaler Empfangszeit, effektiver Erreichbarkeit und Statusquelle im Schnappschuss auf |
+| `libs/RoboHubEurekaZustand.php` | Gemeinsame Shadow-Konsistenzprüfung für Anzeige/Planer, Zielauswahl und strikt getrennte Offline-Auswertung der B8-Zustände |
 | `tests/eureka/command-fixtures.php` | Simulierte Referenzzuordnung für Offline-Tests, kein produktives Geräteprofil |
 | `tests/eureka/e20-fixture.php` | Anonymisierte live bestätigte E20-Cachestruktur mit produktbezogener SN8 und Herkunft |
 | `tests/eureka/command-test.php` | Rahmen, Validierung, Zustand, Transportfehler, Einmaligkeit, beide Produktionssperren |
 | `tests/eureka/token-test.php` | Bestehende Token-Races plus Befehlsweg mit echter Konto-Persistierung und GET-Regressionen |
 | `.tools/test-eureka.inc.php` | Integration von Konto, Konfigurator und Gerät; Schnappschuss und unveränderte Lesefreigaben |
 
-Der allgemeine Herstellervertrag, Parent-Verwaltung, GET-Leseparser, Modul-GUIDs,
+Der allgemeine Herstellervertrag, Parent-Verwaltung, Modul-GUIDs,
 `module.json`, Bedienoberflächen und Variablenaktionen wurden nicht geändert.
 Eureka bleibt bei HTTPS ohne eigene MQTT-Verbindung.
 
@@ -90,27 +97,30 @@ Goldene Testvektoren wurden unabhängig mit der lokalen Python-Referenz erzeugt:
 | Station | `AA0DB80000000000000222010016` |
 
 Die Planung benötigt einen dem Zielgerät zugeordneten, maximal 120 Sekunden alten
-Schnappschuss und Online-Meldung. Die 120 Sekunden sind eine bewusst konservative
+Schnappschuss und explizites `connected=true` im Shadow. Die 120 Sekunden sind eine bewusst konservative
 lokale Sicherheitsgrenze, kein Protokollstandard. Bekannte widersprüchliche
 Geräte-IDs, Offline-Meldungen, Zustandswidersprüche und Gerätefehler sperren.
+Ein fehlender Fehlerbefund reicht ebenfalls nicht aus. Die lokale Empfangszeit
+ist kein bestätigter Gerätezeitstempel; die Frische des Shadow selbst bleibt offen.
 
 - `start` bei `pause` → ausschließlich Fortsetzen; keine neuen Parameter.
-- `start` bei `stop`, `charging`, `charging_finish`, `on_station` → neuer Auftrag;
+- `start` bei `stop`, `charging`, `charging_finish` → neuer Auftrag;
   explizite Integerparameter `fan`, `water`, `mode` erforderlich, keine Defaults.
   Referenzwerte: fan 0–5, water 0–3, ausschließlich mode 8 (Ganzhaus).
 - `pause` ausschließlich bei `cleaning`.
 - `station` ausschließlich bei `cleaning`, `pause` oder `stop`.
 - Unbekannte Zustände, `sleep`, Update, Rückfahrt, `charging_pause` und
-  `wiping_pause` erlauben keine automatische Entscheidung. Bereits laufende
+  `wiping_pause`, `on_station` erlauben keine automatische Entscheidung. Bereits laufende
   Reinigung und bereits gedocktes Gerät erlauben keinen redundanten Start bzw.
   Stationsbefehl.
 - Stoppen, Orten, Saug-/Wasserstufe, Räume, Zeitpläne und Wartungsreset bleiben
   gesperrt. Die Startparameter sind keine freigeschalteten Einstellaktionen.
 
 Diese Zustandsnamen und Parameterbereiche sind Referenzwissen; ihre Bedeutung am
-E20 muss vor einer Aktivierung belegt werden. Die bestehende Statusanzeige bleibt
-absichtlich auf ihrer bisherigen Zuordnung; insbesondere wird `pause` dort noch
-nicht als live bestätigter E20-Zustand ergänzt.
+E20 muss vor einer Aktivierung mit echten Daten bestätigt werden. Die korrigierte
+Statusanzeige unterscheidet unter anderem Pause, Rückfahrt, Laden und Schlaf.
+Anzeige und Planer teilen dieselbe Parent-Konsistenzprüfung; die Anzeige weiterer
+Zustände erweitert nicht die erlaubten Befehlsentscheidungen.
 
 ## HTTPS, Token und unklare Ergebnisse
 
@@ -186,8 +196,8 @@ generischen Steuerflächen erhalten weiterhin die Sperrmeldung. Die Tests nutzen
 einen separaten injizierten Fixture-Transport; es gibt keinen Simulationsschalter,
 der den echten Adapter zur Laufzeit freischalten könnte.
 
-Offene Risiken vor einer späteren Aktivierung: Analyse des Plugins 2.5.4,
-E20-Zustandssemantik, Parameterwerte und reales Antwortformat; native
+Offene Risiken vor einer späteren Aktivierung trotz statischer Analyse 2.5.4:
+reale E20-Cloudzustände und Gerätefrische, Parameterakzeptanz und reales Antwortformat; native
 IP-Symcon-9.1-Laufzeit einschließlich Semaphoren über unabhängige Skripte.
 Die Metadaten bestätigen die B8-Familie, keine Befehlsfreigabe.
 Ein frischer Schnappschuss ist keine atomare Gerätegarantie: Cloud-Schatten,
@@ -197,7 +207,7 @@ Das reale Parallelverhalten der Hersteller-App wurde nicht getestet.
 
 ## Minimaler Plan für einen später einzeln freigegebenen Live-Befehl
 
-1. Zuerst das passende App-Steuerplugin 2.5.4 lokal analysieren und die
+1. Die vorliegende statische Analyse des App-Steuerplugins 2.5.4 und die
    bestätigten Metadaten beim Review berücksichtigen; exakte Gerätezuordnung und den vorgesehenen Rahmen separat reviewen.
    Keine Aktivierung nur aufgrund von `750Y0015` oder eines Referenz-SN8.
 2. Spätere ausdrückliche Freigabe auf **genau einen Pause-Befehl an das separat bestätigte Testgerät**

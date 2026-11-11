@@ -23,7 +23,7 @@ function e20Fixture(): array
                 'panel' => ['name' => 'T0xB8_750Y0015.zip', 'versionName' => '2.5.4'],
             ],
             'stand' => ['deviceId' => 'offline-e20', 'zeit' => 1800000000,
-                'roh' => ['state' => 'cleaning', 'parentState' => 'cleaning', 'batteryLevel' => 87, 'deviceFault' => []]],
+                'roh' => ['state' => 'cleaning', 'parentState' => 'cleaning', 'batteryLevel' => 87, 'deviceFault' => [], 'connected' => true]],
         ],
     ];
 }
