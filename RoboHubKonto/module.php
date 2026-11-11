@@ -1384,7 +1384,13 @@ class RoboHubKonto extends IPSModule
             }
         }
         $daten = $this->treiber()->zustand($buendel, $geraet);
-        $this->schnappschussMerken($did, (string)($geraet['modell'] ?? ''), (array)($daten['roh']['properties'] ?? []));
+        $rohstand = (array)($daten['roh']['properties'] ?? []);
+        if ($this->ReadPropertyString('Hersteller') === 'eureka') {
+            // Nur vorhandene GET-Daten aufbewahren, keine zusätzliche Cloud-Abfrage.
+            // Andere Hersteller behalten ihr bisheriges properties-Format.
+            $rohstand = ['deviceId' => $did, 'zeit' => $jetzt, 'roh' => (array)($daten['roh'] ?? [])];
+        }
+        $this->schnappschussMerken($did, (string)($geraet['modell'] ?? ''), $rohstand);
 
         $ok = (array)($daten['bloecke']['ok'] ?? []);
         $fehl = (array)($daten['bloecke']['fehl'] ?? []);

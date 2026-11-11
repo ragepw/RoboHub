@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 // Der gesamte Transport bleibt offline; Konto, Konfigurator und Gerät sind echt.
+require_once __DIR__ . '/../tests/eureka/e20-fixture.php';
 abschnitt('Eureka: Integration im Lesebetrieb');
 class IntegrationEureka extends RoboHubEureka
 {
@@ -12,8 +13,8 @@ class IntegrationEureka extends RoboHubEureka
         $payload = rtrim(strtr(base64_encode(json_encode(['exp' => time() + 3600])), '+/', '-_'), '=');
         $data = match (explode('?', $path)[0]) {
             '/auth/login/email-password' => ['accessToken' => 'offline.' . $payload . '.fixture', 'refreshToken' => 'offline-refresh'],
-            '/app/devices' => [['deviceId' => 'offline-e20', 'nickname' => 'Offline Eureka', 'product' => ['productModel' => '750Y0015'], 'connected' => true]],
-            '/shadow/device/state' => [['state' => 'cleaning', 'parentState' => 'cleaning', 'batteryLevel' => 87, 'deviceFault' => []]],
+            '/app/devices' => [e20Fixture()['geraet']['roh']],
+            '/shadow/device/state' => [e20Fixture()['geraet']['stand']['roh']],
             default => throw new RuntimeException('Unerwarteter Offline-Transport.'),
         };
         return ['status' => 200, 'response' => json_encode(['errorCode' => 0, 'data' => $data])];
@@ -40,7 +41,7 @@ try {
     $ek->VerbindungPruefen();
     $eurekaIo = $ek->parent->InstanceID;
     $el = json_decode($ek->GeraeteListe(), true);
-    check('Geräteerkennung erhält Modell 750Y0015', ($el['geraete'][0]['modell'] ?? '') === '750Y0015');
+    check('Geräteerkennung erhält Modell E20 Evo Plus', ($el['geraete'][0]['modell'] ?? '') === 'E20 Evo Plus');
     $ef = json_decode(konsole($cfg->GetConfigurationForm()), true);
     $zeile = null;
     foreach ($ef['elements'] as $element) {
@@ -50,18 +51,25 @@ try {
             }
         }
     }
-    check('Konfigurator erzeugt Eureka-Gerät mit passendem Konto und Virtual IO', ($zeile['create'][0]['configuration']['Modell'] ?? '') === '750Y0015'
+    check('Konfigurator erzeugt Eureka-Gerät mit passendem Konto und Virtual IO', ($zeile['create'][0]['configuration']['Modell'] ?? '') === 'E20 Evo Plus'
         && ($zeile['create'][1]['configuration']['Hersteller'] ?? '') === 'eureka'
         && ($zeile['create'][2]['moduleID'] ?? '') === '{6179ED6A-FC31-413C-BB8E-1204150CF376}');
     $eg = new RoboHubGeraet(9601);
     $eg->Create();
     $eg->parent = $ek;
     $eg->props['GeraetID'] = 'offline-e20';
-    $eg->props['Modell'] = '750Y0015';
+    $eg->props['Modell'] = 'E20 Evo Plus';
     $eg->ApplyChanges();
     $eg->Aktualisieren();
     check('Gerätemodul erhält Eureka-Zustand und Akku über das Konto', variable(9601, 'Zustand')['value'] === RoboHubModell::ZUSTAND_REINIGT
         && variable(9601, 'Akku')['value'] === 87);
+    $es = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'] ?? [];
+    check('Vorhandener Eureka-GET-Stand bleibt mit Gerätebindung und Zeit für spätere Offline-Planung erhalten',
+        ($es['deviceId'] ?? '') === 'offline-e20' && is_int($es['zeit'] ?? null)
+        && abs(time() - $es['zeit']) < 5 && ($es['roh']['state'] ?? '') === 'cleaning'
+        && ($es['roh']['batteryLevel'] ?? null) === 87);
+    check('Lesebetrieb gibt weiterhin keine Eureka-Einstellungen frei', $eg->ReadAttributeString('Schreibbar') === '[]'
+        && $et->normalisiere('E20 Evo Plus', ['state' => 'pause'])['werte']['Zustand'] === RoboHubModell::ZUSTAND_UNBEKANNT);
     $vorher = count($et->pfade);
     $blockiert = json_decode($ek->ForwardData(json_encode(['Aktion' => 'befehl', 'Geraet' => 'offline-e20', 'Befehl' => 'start'])), true);
     check('Steuerbefehle werden ohne Cloud-Aufruf abgelehnt', !$blockiert['ok'] && count($et->pfade) === $vorher);

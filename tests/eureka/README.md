@@ -3,15 +3,58 @@
 Alle automatischen Eureka-Prüfungen laufen ohne Hersteller-Cloud:
 
 ```sh
+php tests/eureka/command-test.php
 php tests/eureka/token-test.php
 php .tools/test-robohub.php
 find . -name '*.php' -print0 | xargs -0 -n1 php -l
 git diff --check
 ```
 
+Der neue, weiterhin produktiv gesperrte Befehlsweg ist in
+[docs/eureka-steuerung.md](../../docs/eureka-steuerung.md) beschrieben:
+Gerätenachweise und fehlende E20-Zuordnung, Rahmen, Start/Resume-Entscheidung,
+eigener POST-Parser, Token-Anbindung, Sicherheitsgrenzen und späterer Einmaltest.
+`command-test.php` nutzt simulierte Gerätezuordnungen und Antworten sowie den
+aus früheren Untersuchungsangaben rekonstruierten `e20-fixture.php` (kein Original-JSON);
+`command-fixtures.php` ist kein produktives Geräteprofil.
+
+## Aktueller Befehlsweg-Prüfstand (11.11.2026)
+
+Metadatenbereinigung geprüft mit PHP 8.2.35. Alle drei Prüfstände liefen mit
+`bwrap --unshare-net --dev-bind / / -- …`: keine externe Netzwerkverbindung,
+Loopback für lokale Roboter-Nachbauten bleibt verfügbar.
+
+- RoboHub-Gesamttests: **1.140 bestanden, 0 Fehler**.
+- Eureka-Befehlstests: **205 bestanden, 0 Fehler**.
+- Token-/GET-Tests: **66 bestanden, 0 Fehler**.
+- PHP-Lint: **63 Dateien ohne Syntaxfehler**.
+- `git diff --check` und entsprechende Whitespace-Prüfung neuer Dateien: fehlerfrei.
+
+Die E20-Tests prüfen ausdrücklich B8-Erkennung bei weiterhin unbekannter SN8,
+Ablehnung auch einer künstlichen exakten Zuordnung ohne SN8, keinen Transport
+beim produktiven Einstieg sowie unveränderte Freigabekonstante und leere
+Produktivzuordnung. Weitere Regressionen prüfen fremde Plugins, unbekannte
+Versionen, widersprüchliche Metadaten und explizite ungültige Nullwerte.
+Der vollständige Diff einschließlich aller neuen Dateien wurde auf sensible
+Informationen geprüft: ausschließlich synthetische Zugangsdaten und Geräte-IDs;
+keine echten Tokens oder personenbezogenen Gerätekennungen gefunden.
+
+Als weiterhin gesperrte Offline-Vorbereitung ist ein Commit vertretbar. Die
+Metadatenmatrix und verbleibenden Aktivierungsrisiken stehen in der verlinkten
+Dokumentation. Änderungen bleiben lokal; kein Commit oder Push wurde ausgeführt.
+Historische Ergebnisse weiter unten beziehen sich auf frühere Stände.
+
+Die Produktivsperre wurde sowohl über den finalen Treibereinstieg als auch direkt
+am echten Transport vor cURL geprüft. Ein Timeout oder eine bereits angenommene
+Anfrage kann innerhalb desselben Befehlsversuchs keinen zweiten POST auslösen.
+Cloud-Annahme wird niemals als tatsächliche Ausführung ausgewiesen.
+Die E20-B8-Familie ist durch die Untersuchungsangaben gestützt; die
+Gerätefreigabe bleibt unbestätigt und produktiv leer. Kein Commit,
+Push, Deployment, Cloud-Befehl oder Eingriff in produktive IP-Symcon-Instanzen.
+
 `token-test.php` prüft mit deterministischen Fiber-Interleavings die tatsächlichen Konto-Schreibpfade. Die Semaphore-Nachbildung hält getrennte Sperren und lässt konkurrierende Refreshs gezielt warten. Abmeldung und Anmeldung laufen während eines angehaltenen Cloud-Transports. Geprüft werden auch identische Tokens einer neuen Sitzung, verspätete Auth-Fehler, Rotation und Sperr-Timeouts. Alle Zugangsdaten sind erfundene Offline-Fixtures.
 
-`.tools/test-eureka.inc.php` wird vom Gesamtprüfstand eingebunden. Er prüft Treiberauswahl, Herstellerregistrierung, Kontoanmeldung, Passwortverwerfen, Token-Persistierung, Geräteerkennung für Modell 750Y0015, Konfigurator mit Virtual IO, Statusübernahme durch das Gerätemodul und die Abweisung von Steuerbefehlen. Nur der Transport wird ersetzt.
+`.tools/test-eureka.inc.php` wird vom Gesamtprüfstand eingebunden. Er prüft Treiberauswahl, Herstellerregistrierung, Kontoanmeldung, Passwortverwerfen, Token-Persistierung, Geräteerkennung für Modell E20 Evo Plus, Konfigurator mit Virtual IO, Statusübernahme durch das Gerätemodul und die Abweisung von Steuerbefehlen. Nur der Transport wird ersetzt.
 
 `cloud-probe.php` und `driver-probe.php` sind manuelle Live-Proben und gehören nicht zum Offline-Prüfstand. Sie wurden im Rahmen dieses Auftrags nicht ausgeführt.
 
@@ -20,7 +63,7 @@ git diff --check
 Erst nach gesonderter Freigabe in einer Testinstanz mit diesem Arbeitsstand testen. Keine produktive Installation ist Teil dieses Auftrags.
 
 1. Konto mit Hersteller Eureka und Region EU einrichten. Nach der Anmeldung prüfen, dass das Passwortfeld leer ist und das Konto aktiv wird.
-2. Geräte suchen: Modell 750Y0015 muss im gemeinsamen Konfigurator erscheinen. Die Kette muss Gerät → Eureka-Konto → Virtual IO verwenden; Eureka benötigt kein MQTT.
+2. Geräte suchen: Modell E20 Evo Plus muss im gemeinsamen Konfigurator erscheinen. Die Kette muss Gerät → Eureka-Konto → Virtual IO verwenden; Eureka benötigt kein MQTT.
 3. Das Gerät über den Konfigurator anlegen und ausschließlich „Aktualisieren“ verwenden. Akku, Erreichbarkeit und Zustand mit der unveränderten Hersteller-App vergleichen.
 4. Automatische Erneuerung beobachten. Anschließend Abmeldung und erneute Anmeldung kontrolliert prüfen: kein Wiedererscheinen eines alten Token-Bündels. Keine Token-Inhalte in Screenshots oder Logs übernehmen.
 5. Start, Pause, Docking, Wartungsreset und Kartensteuerung nicht verwenden. Die Eureka-Steuerpfade bleiben gesperrt. Firmware und Hersteller-App bleiben unverändert.

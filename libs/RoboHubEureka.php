@@ -2,11 +2,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/RoboHubModell.php';
+require_once __DIR__ . '/RoboHubEurekaBefehlsweg.php';
 
 /**
  * Eureka / MZ-Robo Cloud
- * Erste Version: Anmeldung, Geräte und Status.
- * Keine Steuerbefehle und keine Firmwareänderungen.
+ * Anmeldung, Geräte und Status. Befehlsweg vorbereitet, Produktivversand gesperrt.
  */
 class RoboHubEureka implements RoboHubTreiber
 {
@@ -26,6 +26,10 @@ class RoboHubEureka implements RoboHubTreiber
     private const BASE = 'https://euprod.mzrobo.com';
     private const CLIENT_ID = '1301';
     private const APP_VERSION = '1.2.1.26101001';
+    // Nur nach gesonderter Freigabe und Review im Quellcode änderbar.
+    private const BEFEHLE_FREIGEGEBEN = false;
+    // Kein lokaler Nachweis einer E20-Zuordnung vorhanden. Keine Modell-Heuristik.
+    private const BEFEHLS_ZUORDNUNGEN = [];
 
     protected function transport(
         string $method,
@@ -33,6 +37,10 @@ class RoboHubEureka implements RoboHubTreiber
         string $token = '',
         ?array $body = null
     ): array {
+        // Zweite, vom befehl()-Einstieg unabhängige Sperre VOR Headern und cURL.
+        if (str_starts_with($path, '/devices/commands')) {
+            throw new RoboHubFehler('Eureka: Produktiver Befehls-Transport gesperrt.');
+        }
         $headers = [
             'Accept-Language: en',
             'nonce: ' . bin2hex(random_bytes(16)),
@@ -358,15 +366,24 @@ class RoboHubEureka implements RoboHubTreiber
         );
     }
 
-    public function befehl(
+    final public function befehl(
         array $buendel,
         array $geraet,
         string $befehl,
         array $parameter
     ): string {
-        throw new RoboHubFehler(
-            'Eureka: Steuerbefehle noch nicht freigegeben.'
+        if (!self::BEFEHLE_FREIGEGEBEN) {
+            throw new RoboHubFehler('Eureka: Steuerbefehle noch nicht freigegeben.');
+        }
+        // Das Konto liefert bereits ein erneuertes und persistiertes Bündel.
+        // Eine neue Instanz entspricht genau einem Versuch, ohne POST-Wiederholung.
+        $weg = new RoboHubEurekaBefehlsweg(
+            fn(string $method, string $path, string $token, ?array $body): array =>
+                $this->transport($method, $path, $token, $body),
+            self::BEFEHLS_ZUORDNUNGEN,
+            $this->beiUnauthorized
         );
+        return $weg->befehl($buendel, $geraet, $befehl, $parameter, $this->jetzt());
     }
 
     public function echtzeitMoeglich(): bool

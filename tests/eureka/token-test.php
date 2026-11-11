@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 // Ausschließlich Offline-Fixtures. Der Transport wird vollständig ersetzt.
 require_once __DIR__ . '/../../libs/RoboHubEureka.php';
+require_once __DIR__ . '/command-fixtures.php';
 
 const KL_MESSAGE = 10201;
 const KL_WARNING = 10204;
@@ -74,6 +75,10 @@ class OfflineEureka extends RoboHubEureka
     public array $antworten = [];
     public int $aufrufe = 0;
     protected function jetzt(): int { return 1800000000; }
+    public function simulierterTransport(string $method, string $path, string $token = '', ?array $body = null): array
+    {
+        return $this->transport($method, $path, $token, $body);
+    }
     protected function transport(string $method, string $path, string $token = '', ?array $body = null): array
     {
         $this->aufrufe++;
@@ -147,7 +152,7 @@ foreach (['geraete', 'zustand'] as $aktion) {
     $tests['401: zentral speichern und einmal wiederholen (' . $aktion . ')'] = static function () use ($aktion): void {
         $t = new OfflineEureka();
         $k = konto($t, buendel());
-        $k->attrs['Geraete'] = json_encode([['id' => 'offline-device', 'modell' => '750Y0015']]);
+        $k->attrs['Geraete'] = json_encode([['id' => 'offline-device', 'modell' => 'E20 Evo Plus']]);
         $t->antworten = [antwort([], 401), static function () use ($k): array {
             pruefe($GLOBALS['gesperrt'] && json_decode($k->attrs['Buendel'], true) === buendel());
             return antwort(neu());
@@ -354,6 +359,84 @@ $tests['Auth-Fehler darf bei Sperr-Timeout keine Tokens löschen'] = static func
     try { pruefe(!abruf($k)['ok'] && $k->attrs['Buendel'] === $alt && $GLOBALS['locks'] === []); }
     finally { unset($GLOBALS['timeoutName']); }
 };
+$tests['Befehlsweg: zentrale proaktive Rotation vor genau einem POST persistiert'] = static function (): void {
+    $t = new OfflineEureka(); $k = konto($t, buendel(240));
+    $t->antworten = [antwort(neu()), static function ($method, $path, $token, $body) use ($k): array {
+        $gespeichert = json_decode($k->attrs['Buendel'], true);
+        pruefe($method === 'POST' && $path === '/devices/commands/offline-command-device');
+        pruefe($token === $gespeichert['access_token'] && $gespeichert['refresh_token'] === neu()['refreshToken']);
+        pruefe($body === ['data' => 'AA0DB800000000000002221C00FB'] && !$GLOBALS['gesperrt']);
+        return antwort(null);
+    }];
+    $vorbereiten = new ReflectionMethod(RoboHubKonto::class, 'gueltigesBuendel');
+    $b = $vorbereiten->invoke($k);
+    $w = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $k->neuerTreiber()->beiUnauthorized);
+    $r = $w->ausfuehren($b, commandDevice('pause'), 'start', [], COMMAND_NOW);
+    pruefe($r['angenommen'] && !$r['ausgefuehrt'] && $t->aufrufe === 2 && $GLOBALS['locks'] === []);
+};
+$tests['Befehlsweg: 401 rotiert zentral, wiederholt POST nicht; nächster expliziter Versuch nutzt Rotation'] = static function (): void {
+    $t = new OfflineEureka(); $k = konto($t, buendel());
+    $t->antworten = [antwort(null, 401), static function ($method) use ($k): array {
+        pruefe($method === 'GET' && $GLOBALS['gesperrt'] && json_decode($k->attrs['Buendel'], true) === buendel());
+        return antwort(neu());
+    }];
+    $w = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $k->neuerTreiber()->beiUnauthorized);
+    pruefe(fehler(fn() => $w->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW))->getCode() === 401);
+    $gespeichert = json_decode($k->attrs['Buendel'], true);
+    pruefe($gespeichert['refresh_token'] === neu()['refreshToken'] && $t->aufrufe === 2);
+    fehler(fn() => $w->ausfuehren($gespeichert, commandDevice('pause'), 'start', [], COMMAND_NOW));
+    pruefe($t->aufrufe === 2);
+    $t->antworten[] = static function ($method, $path, $token): array {
+        pruefe($method === 'POST' && $token === neu()['accessToken'] && !$GLOBALS['gesperrt']);
+        return antwort(null);
+    };
+    $w2 = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $k->neuerTreiber()->beiUnauthorized);
+    pruefe($w2->ausfuehren($gespeichert, commandDevice('pause'), 'start', [], COMMAND_NOW)['angenommen']);
+    pruefe($t->aufrufe === 3);
+};
+$tests['Befehlsweg: parallele 401 verwenden eine zentral persistierte Rotation, ohne POST-Retry'] = static function (): void {
+    $t = new OfflineEureka(); $k = konto($t, buendel());
+    $t->antworten = [antwort(null, 401), static function (): array { Fiber::suspend('command-refresh'); return antwort(neu()); }, antwort(null, 401)];
+    $callback = $k->neuerTreiber()->beiUnauthorized;
+    $w1 = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $callback);
+    $w2 = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $callback);
+    $f1 = new Fiber(static fn() => fehler(fn() => $w1->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW)));
+    $f2 = new Fiber(static fn() => fehler(fn() => $w2->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW)));
+    pruefe($f1->start() === 'command-refresh' && $f2->start() === 'wartet');
+    $f1->resume(); $f2->resume();
+    pruefe($f1->isTerminated() && $f2->isTerminated() && $t->aufrufe === 3);
+    pruefe(json_decode($k->attrs['Buendel'], true)['refresh_token'] === neu()['refreshToken'] && $GLOBALS['locks'] === []);
+};
+$tests['Befehlsweg: Abmeldung während Refresh verhindert erneutes Speichern und zweiten POST'] = static function (): void {
+    $t = new OfflineEureka(); $k = konto($t, buendel());
+    $t->antworten = [antwort(null, 401), static function (): array { Fiber::suspend('command-refresh'); return antwort(neu()); }];
+    $w = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $k->neuerTreiber()->beiUnauthorized);
+    $f = new Fiber(static fn() => fehler(fn() => $w->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW)));
+    pruefe($f->start() === 'command-refresh'); $k->Abmelden(); $f->resume();
+    pruefe($f->isTerminated() && $k->attrs['Buendel'] === '' && $t->aufrufe === 2 && $GLOBALS['locks'] === []);
+};
+$tests['Befehlsweg: bestätigter Auth-Refresh-401 löscht zentral, ohne zweiten POST'] = static function (): void {
+    $t = new OfflineEureka(); $k = konto($t, buendel());
+    $t->antworten = [antwort(null, 401), antwort(null, 401)];
+    $w = new RoboHubEurekaBefehlsweg([$t, 'simulierterTransport'], commandMappings(), $k->neuerTreiber()->beiUnauthorized);
+    fehler(fn() => $w->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW));
+    pruefe($k->attrs['Buendel'] === '' && $t->aufrufe === 2 && $GLOBALS['locks'] === []);
+};
+foreach (['direkt', 'data', 'list', 'devices', 'items', 'ohne-errorCode'] as $form) {
+    $tests['GET-Leseparser behält Geräteformat ' . $form] = static function () use ($form): void {
+        $t = new OfflineEureka();
+        $g = [e20Fixture()['geraet']['roh']];
+        $result = in_array($form, ['list', 'devices', 'items'], true) ? [$form => $g] : $g;
+        $payload = match ($form) {
+            'direkt' => $g,
+            'ohne-errorCode' => ['data' => $g],
+            default => ['errorCode' => 0, 'data' => $result],
+        };
+        $t->antworten[] = ['status' => 200, 'response' => json_encode($payload)];
+        $devices = $t->geraete(buendel());
+        pruefe(count($devices) === 1 && $devices[0]['modell'] === 'E20 Evo Plus' && $t->aufrufe === 1);
+    };
+}
 $fehler = 0;
 foreach ($tests as $name => $test) {
     try {
