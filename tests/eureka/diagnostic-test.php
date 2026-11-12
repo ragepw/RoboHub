@@ -474,6 +474,67 @@ $tests['Normalbefehle und Transport bleiben auch mit Diagnosefreigabe gesperrt']
     }
     sicher($t->calls === []);
 };
+// Derselbe vorhandene Rahmenbauer, keine produktiven Telegramme.
+function schlafFrame(int $typ, int $laenge = 50, int $arbeit = 12): string
+{
+    $body = array_fill(0, $laenge - 11, 0);
+    $body[0] = 0x32; $body[1] = 1; $body[2] = $arbeit; $body[12] = 87;
+    if ($laenge >= 50) { $body[38] = $typ; }
+    return RoboHubEurekaProtokoll::rahmen($body, 3);
+}
+foreach (range(0, 255) as $typ) {
+    $tests['Optionaler B8-Schlafuntertyp ' . $typ] = static function () use ($typ): void {
+        $r = RoboHubEurekaB8::antwort(antwort(schlafFrame($typ)));
+        sicher($r['frameGueltig'] && ($r['felder']['sleep_type'] ?? null) === (in_array($typ, [1, 2, 3, 4], true) ? $typ : null));
+    };
+}
+foreach ([37, 48, 49, 50, 51] as $laenge) {
+    $tests['Schlafbyte nur vor Prüfsumme und bei ausreichender Länge ' . $laenge] = static function () use ($laenge): void {
+        $hex = schlafFrame(2, $laenge);
+        $r = RoboHubEurekaB8::antwort(antwort($hex));
+        sicher($r['frameGueltig'] && ($r['felder']['sleep_type'] ?? null) === ($laenge >= 50 ? 2 : null));
+        $r = RoboHubEurekaB8::antwort(antwort(substr_replace($hex, 'FF', -2)));
+        sicher(!$r['frameGueltig'] && !isset($r['felder']));
+    };
+}
+foreach ([1, 2, 3, 4, 0, 255] as $typ) {
+    $tests['Bestehende Diagnose ergänzt nur belegten Schlafstand ' . $typ] = static function () use ($typ): void {
+        [$k, $t] = konto();
+        $snap = json_decode($k->attrs['Schnappschuss'], true);
+        $snap['offline-e20']['p']['roh'] += ['cleanMissionState' => 'no_cleaning_mission'];
+        $snap['offline-e20']['p']['roh']['state'] = 'ERP_model';
+        $snap['offline-e20']['p']['roh']['parentState'] = 'sleep';
+        $k->attrs['Schnappschuss'] = json_encode($snap);
+        $ticket = frei($k);
+        $t->antwort = antwort(schlafFrame($typ));
+        $r = json_decode($k->EurekaB8Testen($ticket), true);
+        $neu = json_decode($k->attrs['Schnappschuss'], true)['offline-e20']['p'];
+        sicher(isset($neu['b8']) === in_array($typ, [1, 2, 4], true));
+        unset($neu['b8']);
+        sicher($neu === $snap['offline-e20']['p'] && count($t->calls) === 1);
+    };
+}
+foreach (['ungueltig', 'fehlt', 'kontext-geaendert'] as $fall) {
+    $tests['Fehlender oder unzugeordneter neuer B8-Befund erhält keinen alten Schlafbeleg ' . $fall] = static function () use ($fall): void {
+        [$k, $t] = konto();
+        shadowAendern($k, function (&$s) {
+            $s['roh']['state'] = 'ERP_model'; $s['roh']['parentState'] = 'sleep';
+            $s['roh']['cleanMissionState'] = 'no_cleaning_mission';
+            $s['b8'] = ['zeit' => time(), 'felder' => ['arbeit' => 12, 'akku' => 87,
+                'fehlerklasse' => 0, 'fehlercode' => 0, 'sleep_type' => 1]];
+        });
+        $ticket = frei($k);
+        $t->antwort = static function () use ($k, $fall): array {
+            if ($fall === 'kontext-geaendert') {
+                shadowAendern($k, function (&$s) { $s['zeit']--; });
+                return antwort(schlafFrame(1));
+            }
+            return antwort($fall === 'fehlt' ? null : 'invalid');
+        };
+        $k->EurekaB8Testen($ticket);
+        sicher(!isset(json_decode($k->attrs['Schnappschuss'], true)['offline-e20']['p']['b8']));
+    };
+}
 $tests['B8-Parser akzeptiert dokumentierte Mindestlänge und keine unbekannten Felder'] = function (): void {
     $r = RoboHubEurekaB8::lesen(frame()); sicher($r['plausibel']);
     sicher($r['felder'] === ['arbeit' => 6, 'akku' => 87, 'fehlerklasse' => 0, 'fehlercode' => 0]);

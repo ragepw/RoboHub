@@ -63,12 +63,14 @@ final class RoboHubEurekaBefehlsweg
         }
         $state = $roh['state'] ?? null;
         $bewertung = RoboHubEurekaZustand::shadow($roh);
+        $schlaf = $befehl === 'start' ? RoboHubEurekaZustand::schlafAktion($stand, $jetzt) : null;
         // charging_pause/wiping_pause können eine andere Wiederaufnahme erfordern.
         $gruppe = match ($state) {
             'cleaning' => 'cleaning',
             'pause' => 'paused',
             'stop' => 'idle',
             'charging', 'charging_finish' => 'docked',
+            'ERP_model' => $schlaf === null ? null : 'sleep-' . $schlaf,
             default => null,
         };
         if ($gruppe === null || !$bewertung['konsistent'] ||
@@ -76,10 +78,10 @@ final class RoboHubEurekaBefehlsweg
             throw new RoboHubFehler('Eureka: Zustand unbekannt, widersprüchlich oder fehlerhaft.');
         }
         $aktion = $befehl;
-        if ($befehl === 'start' && $gruppe === 'paused') {
+        if ($befehl === 'start' && in_array($gruppe, ['paused', 'sleep-resume'], true)) {
             $aktion = 'resume';
             $hex = RoboHubEurekaProtokoll::fortsetzen();
-        } elseif ($befehl === 'start' && in_array($gruppe, ['idle', 'docked'], true)) {
+        } elseif ($befehl === 'start' && in_array($gruppe, ['idle', 'docked', 'sleep-start'], true)) {
             // Hersteller-Hauptbedienung: neuer Auftrag nur oberhalb 15 Prozent.
             // Fehlender/ungültiger Befund ist keine Erlaubnis. Pause/Resume/Dock
             // erhalten diese Schranke nicht; sie liegen im Plugin davor.

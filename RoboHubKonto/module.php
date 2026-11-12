@@ -662,7 +662,29 @@ class RoboHubKonto extends IPSModule
         return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d) use ($freigabe): string {
             $t = $this->treiberNeu();
             if (!$t instanceof RoboHubEureka) { throw new RoboHubFehler('Eureka: Diagnosetreiber fehlt.'); }
-            $r = $t->diagnoseB8($d, $freigabe);
+            $vorher = $this->eurekaB8Kontext();
+            try {
+                $r = $t->diagnoseB8($d, $freigabe);
+            } finally {
+                // Ein fehlgeschlagener Abruf darf keinen früheren Schlafbeleg erhalten.
+                $snap = json_decode($this->ReadAttributeString('Schnappschuss'), true) ?: [];
+                $id = $vorher['geraet']['id'];
+                unset($snap[$id]['p']['b8']);
+                $this->WriteAttributeString('Schnappschuss', json_encode($snap, JSON_THROW_ON_ERROR));
+            }
+            $aktuell = $this->eurekaB8Kontext();
+            $stand = $vorher['geraet']['stand'];
+            unset($stand['b8']);
+            $zusatz = ['zeit' => time(), 'felder' => $r['felder'] ?? []];
+            $kandidat = array_replace($stand, ['b8' => $zusatz]);
+            if ($r['frameGueltig'] === true && $r['plausibel'] === true &&
+                $aktuell['revision'] === $vorher['revision'] && $aktuell['buendel'] === $vorher['buendel'] &&
+                $aktuell['geraet']['stand'] === $stand &&
+                RoboHubEurekaZustand::schlafAktion($kandidat, time()) !== null) {
+                // Keine neue Statusquelle: nur Zusatz zum exakt selben vorhandenen Stand.
+                $snap[$id]['p']['b8'] = $zusatz;
+                $this->WriteAttributeString('Schnappschuss', json_encode($snap, JSON_THROW_ON_ERROR));
+            }
             if ($r['httpStatus'] === 429) {
                 $this->WriteAttributeInteger('WarteBis', max($this->ReadAttributeInteger('WarteBis'), time() + 60));
             }
@@ -1864,7 +1886,8 @@ class RoboHubKonto extends IPSModule
             throw new RoboHubFehler('Eureka: Shadow aus aktueller Sitzung und Modullaufzeit erforderlich.');
         }
         $kontext = ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt];
-        if (in_array($roh['state'] ?? null, ['stop', 'charging', 'charging_finish'], true)) {
+        if (in_array($roh['state'] ?? null, ['stop', 'charging', 'charging_finish'], true) ||
+            RoboHubEurekaZustand::schlafAktion($g['stand'], $jetzt) === 'start') {
             $kontext['startparameter'] = ['fan' => IPS_GetProperty(22708, 'EurekaStartSaugstufe'),
                 'water' => IPS_GetProperty(22708, 'EurekaStartWasserstufe'), 'mode' => 8];
         }

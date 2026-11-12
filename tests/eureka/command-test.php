@@ -175,6 +175,47 @@ $tests['Pause wird fortgesetzt, ohne neue Saug- oder Wasserwerte'] = static func
     commandAssert($p['aktion'] === 'resume' && $p['body']['data'] === 'AA0DB800000000000002221C00FB');
     commandError(fn() => commandPlan($d));
 };
+// Auswertung des bereits validierten B8-Zusatzes; Cloud-sleep_type allein ist kein Beleg.
+function schlafGeraet(int $typ): array
+{
+    $d = commandDevice('ERP_model');
+    $d['stand']['roh'] += ['parentState' => 'sleep', 'cleanMissionState' => 'no_cleaning_mission'];
+    $d['stand']['b8'] = ['zeit' => COMMAND_NOW, 'felder' => ['arbeit' => 12, 'akku' => 87,
+        'fehlerklasse' => 0, 'fehlercode' => 0, 'sleep_type' => $typ]];
+    return $d;
+}
+foreach ([1, 2, 4] as $typ) {
+    $tests['Belegter Schlaf trennt neuen Start und Continue ' . $typ] = static function () use ($typ): void {
+        $d = schlafGeraet($typ);
+        $parameter = $typ === 2 ? [] : ['fan' => 1, 'water' => 0, 'mode' => 8];
+        $plan = commandPlan($d, 'start', $parameter);
+        commandAssert($plan['aktion'] === ($typ === 2 ? 'resume' : 'start'));
+        commandAssert($plan['body']['data'] === ($typ === 2 ? RoboHubEurekaProtokoll::fortsetzen() : RoboHubEurekaProtokoll::start(1, 0, 8)));
+        if ($typ === 2) { commandError(fn() => commandPlan($d, 'start', ['fan' => 1, 'water' => 0, 'mode' => 8])); }
+        foreach (['pause', 'station'] as $aktion) { commandError(fn() => commandPlan($d, $aktion, [])); }
+    };
+}
+foreach (['missing', 'unknown', 'capability', 'string', 'old', 'future', 'before-shadow', 'work', 'fault', 'battery', 'shadow', 'offline', 'shadow-old'] as $fall) {
+    $tests['Ungültiger Schlafbeleg bleibt gesperrt ' . $fall] = static function () use ($fall): void {
+        $d = schlafGeraet(1);
+        switch ($fall) {
+            case 'missing': unset($d['stand']['b8']); $d['stand']['roh']['sleep_type'] = 1; break;
+            case 'unknown': $d['stand']['b8']['felder']['sleep_type'] = 255; break;
+            case 'capability': $d['stand']['b8']['felder']['sleep_type'] = 3; break;
+            case 'string': $d['stand']['b8']['felder']['sleep_type'] = '1'; break;
+            case 'old': $d['stand']['b8']['zeit'] -= 121; break;
+            case 'future': $d['stand']['b8']['zeit']++; break;
+            case 'before-shadow': $d['stand']['b8']['zeit']--; break;
+            case 'work': $d['stand']['b8']['felder']['arbeit'] = 2; break;
+            case 'fault': $d['stand']['b8']['felder']['fehlercode'] = 1; break;
+            case 'battery': $d['stand']['b8']['felder']['akku'] = 15; break;
+            case 'shadow': $d['stand']['roh']['parentState'] = 'cleaning'; break;
+            case 'offline': $d['online'] = false; break;
+            case 'shadow-old': $d['stand']['zeit'] -= 121; break;
+        }
+        commandError(fn() => commandPlan($d, 'start', ['fan' => 1, 'water' => 0, 'mode' => 8]));
+    };
+}
 // Die real beobachtete Schlafkombination ist für die Anzeige konsistent,
 // belegt aber keinen neuen Auftrag statt Resume (Hersteller: sleepType).
 foreach (['start', 'pause', 'resume', 'station'] as $aktion) {

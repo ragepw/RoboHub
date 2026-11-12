@@ -18,9 +18,12 @@ final class RoboHubEurekaB8
         if (count($b) < 37) {
             throw new RoboHubFehler('Eureka: Unvollständige B8-Arbeitszustandsantwort.');
         }
-        // Bewusst nur Arbeitsstatus, Akku und Fehlerbytes; keine unbekannten Felder.
+        // Optionale Herstellerfelder niemals aus kurzen Frames oder der Prüfsumme lesen.
         $felder = ['arbeit' => $b[12], 'akku' => $b[22],
             'fehlerklasse' => $b[25], 'fehlercode' => $b[26]];
+        if (count($b) > 49 && in_array($b[48], [1, 2, 3, 4], true)) {
+            $felder['sleep_type'] = $b[48];
+        }
         return ['felder' => $felder, 'plausibel' =>
             in_array($b[12], [...range(1, 18), 22, 23, 24], true) && $b[22] <= 100];
     }

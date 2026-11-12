@@ -90,6 +90,29 @@ final class RoboHubEurekaZustand
             } : null];
     }
 
+    /** Ergänzender Diagnosebefund im bestehenden, sitzungsgebundenen Statusstand. */
+    public static function schlafAktion(array $stand, int $jetzt): ?string
+    {
+        $roh = $stand['roh'] ?? [];
+        $b8 = $stand['b8'] ?? [];
+        $f = $b8['felder'] ?? [];
+        if (($roh['state'] ?? null) !== 'ERP_model' || ($roh['parentState'] ?? null) !== 'sleep' ||
+            ($roh['cleanMissionState'] ?? null) !== 'no_cleaning_mission' ||
+            !is_int($stand['zeit'] ?? null) || !is_int($b8['zeit'] ?? null) ||
+            $b8['zeit'] < $stand['zeit'] || $b8['zeit'] > $jetzt || $jetzt - $b8['zeit'] > 120 ||
+            !in_array($f['arbeit'] ?? null, [12, 18], true) ||
+            ($f['fehlerklasse'] ?? null) !== 0 || ($f['fehlercode'] ?? null) !== 0 ||
+            !is_int($f['akku'] ?? null) || $f['akku'] <= 15 || $f['akku'] > 100 ||
+            !is_int($roh['batteryLevel'] ?? null) || $roh['batteryLevel'] <= 15 || $roh['batteryLevel'] > 100) {
+            return null;
+        }
+        return match ($f['sleep_type'] ?? null) {
+            1, 4 => 'start',
+            2 => 'resume',
+            default => null, // Insbesondere Typ 3 ohne bestätigte Fähigkeit.
+        };
+    }
+
     /** Nur eine explizite boolesche Meldung ist ein Verbindungsnachweis. */
     public static function verbunden(array $p): ?bool
     {

@@ -263,6 +263,22 @@ try {
     check('Neustart wiederholt keinen Befehl und erhält Verbrauch', count($ct->posts) === 1 && $ck->ReadAttributeString('EurekaBefehlsversuch') === $verbrauch);
     $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
     check('Alter Shadow bleibt nach Neustart gesperrt', count($ct->posts) === 1);
+    foreach ([1, 2, 4] as $typ) {
+        $reset('ERP_model');
+        $cg->props['EurekaStartSaugstufe'] = 1; $cg->props['EurekaStartWasserstufe'] = 0;
+        $shadowAendern(function (&$s) use ($typ) {
+            $s['roh']['parentState'] = 'sleep'; $s['roh']['cleanMissionState'] = 'no_cleaning_mission';
+            $s['b8'] = ['zeit' => time(), 'felder' => ['arbeit' => 12, 'akku' => 87,
+                'fehlerklasse' => 0, 'fehlercode' => 0, 'sleep_type' => $typ]];
+        });
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+        check('Schlaf ' . $typ . ': gebundener RequestAction-Pfad mit Parametern 1/0 und Einmalverbrauch', count($ct->posts) === 1
+            && $ct->posts[0][2] === ['data' => $typ === 2 ? RoboHubEurekaProtokoll::fortsetzen() : RoboHubEurekaProtokoll::start(1, 0, 8)]);
+        $shadowAendern(function (&$s) { $s['sitzung'] = 'andere-sitzung'; });
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+        check('Schlafbefund überwindet keine Sitzungsbindung ' . $typ, count($ct->posts) === 1);
+    }
 } finally {
     $GLOBALS['robohubTreiberFabrik'] = $controlFabrik;
     $GLOBALS['OBJ'] = $controlObj; $GLOBALS['INST'] = $controlInst;
