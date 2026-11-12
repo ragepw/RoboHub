@@ -715,6 +715,40 @@ class RoboHubKonto extends IPSModule
             'cacheZeit' => $this->ReadAttributeInteger('GeraeteStand'), 'geraet' => $g];
     }
 
+    /** Nur lokale Dock-Shadow-Lesediagnose; keine Buffer, Aktionen oder Freigaben. */
+    public function EurekaDockShadowLesediagnose(): string
+    {
+        $id = IPS_GetProperty(22708, 'GeraetID');
+        $snap = json_decode($this->ReadAttributeString('Schnappschuss'), true);
+        $s = is_string($id) && is_array($snap) ? ($snap[$id]['p'] ?? []) : [];
+        $s = is_array($s) ? $s : [];
+        $roh = is_array($s['roh'] ?? null) ? $s['roh'] : [];
+        $quelle = is_array($s['statusquelle'] ?? null) ? $s['statusquelle'] : [];
+        $state = $roh['state'] ?? null;
+        $get = ($quelle['quelle'] ?? null) === 'shadow-get';
+        $online = !array_key_exists('online', $s) || $s['online'] === false;
+        $zustand = in_array($state, ['stop', 'pause', 'cleaning'], true);
+        $connectedFehlt = !array_key_exists('connected', $roh);
+        $jetzt = time();
+        $frisch = static fn($t): bool => is_int($t) && $t > 0 && $t <= $jetzt && $jetzt - $t <= 120;
+        return json_encode([
+            'shadowVorhanden' => $s !== [],
+            'lokaleZielbindung' => ($s['deviceId'] ?? null) === $id && is_string($id) && $id !== '',
+            'listeLokalFrisch' => $frisch($this->ReadAttributeInteger('GeraeteStand')),
+            'shadowLokalFrisch' => $frisch($s['zeit'] ?? null),
+            'connectedFehlt' => $connectedFehlt,
+            'connectedExplizitFalse' => ($roh['connected'] ?? null) === false,
+            'rohOnlineExplizitFalse' => ($roh['online'] ?? null) === false,
+            'getHerkunftErfuellt' => $get,
+            'abgeleitetesOnlineErfuellt' => $online,
+            'arbeitszustandErfuellt' => $zustand,
+            'state' => in_array($state, ['stop', 'pause', 'cleaning', 'charging', 'charging_finish',
+                'charging_back', 'collecting_dust', 'ERP_model'], true) ? $state : 'sonstig/fehlend',
+            // Nur die Teilbedingung aus Meldung 2, keine vollständige Dockvorprüfung.
+            'meldung2Teilbedingung' => $connectedFehlt && (!$get || !$online || !$zustand),
+        ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+    }
+
     /** Separater administrativer Dock-Einmalpfad; lokale Prüfung ohne GET/Freigabe. */
     public function EurekaDockVorpruefen(): string
     {

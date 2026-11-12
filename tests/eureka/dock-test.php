@@ -34,6 +34,95 @@ function dockTicket(RoboHubKonto $k, bool $ausnahme = false): string
         $ausnahme ? RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG : ''), true)['freigabe'];
 }
 $tests = [];
+require_once __DIR__ . '/observed-shadow-fixtures.php';
+// Native Wrapper-Nachbildung: Attribute werden ausschließlich durch das Modul gelesen.
+function ROBOHUB_EurekaDockShadowLesediagnose(int $id): string
+{
+    sicher($id === 45174);
+    return $GLOBALS['lesediagnoseKonto']->EurekaDockShadowLesediagnose();
+}
+// Ohne Vorprüfung/Initialisierung: jeder Schreib-, Buffer- oder Logzugriff scheitert.
+class ShadowLesekonto extends RoboHubKonto
+{
+    public function ReadAttributeString(string $n): string
+    {
+        sicher($n === 'Schnappschuss');
+        return parent::ReadAttributeString($n);
+    }
+    public function ReadAttributeInteger(string $n): int
+    {
+        sicher($n === 'GeraeteStand');
+        return parent::ReadAttributeInteger($n);
+    }
+    public function WriteAttributeString(string $n, string $v): void { throw new RuntimeException('Schreibzugriff'); }
+    public function WriteAttributeInteger(string $n, int $v): void { throw new RuntimeException('Schreibzugriff'); }
+    public function GetBuffer(string $n): string { throw new RuntimeException('Bufferzugriff'); }
+    public function SetBuffer(string $n, string $v): void { throw new RuntimeException('Bufferzugriff'); }
+    public function SendDebug(string $n, string $s, int $f): void { throw new RuntimeException('Logzugriff'); }
+}
+foreach (['', '{', 'null', '{"offline-e20":{"p":"fixture-secret"}}',
+    json_encode(['offline-e20' => ['p' => ['deviceId' => 'offline-e20', 'zeit' => time() - 121,
+        'roh' => ['state' => 'fixture-secret', 'connected' => false, 'online' => false,
+            'token' => 'fixture-secret'], 'statusquelle' => ['quelle' => 'fixture-secret']]]])] as $index => $snap) {
+    $tests['Öffentliche Shadow-Lesediagnose ohne Initialisierung ' . $index] = function () use ($snap, $index): void {
+        $k = new ShadowLesekonto(45174);
+        $k->attrs = ['Schnappschuss' => $snap, 'GeraeteStand' => time() - 121];
+        $vorher = [$k->attrs, $k->puffer, $k->logs];
+        $ausgabe = $k->EurekaDockShadowLesediagnose();
+        $d = json_decode($ausgabe, true, 512, JSON_THROW_ON_ERROR);
+        sicher(array_keys($d) === ['shadowVorhanden', 'lokaleZielbindung', 'listeLokalFrisch',
+            'shadowLokalFrisch', 'connectedFehlt', 'connectedExplizitFalse', 'rohOnlineExplizitFalse',
+            'getHerkunftErfuellt', 'abgeleitetesOnlineErfuellt', 'arbeitszustandErfuellt',
+            'state', 'meldung2Teilbedingung']);
+        foreach ($d as $feld => $wert) { sicher($feld === 'state' ? $wert === 'sonstig/fehlend' : is_bool($wert)); }
+        sicher(!$d['listeLokalFrisch'] && !$d['shadowLokalFrisch'] && $d['meldung2Teilbedingung'] === ($index !== 4));
+        sicher($d['connectedExplizitFalse'] === ($index === 4) && $d['rohOnlineExplizitFalse'] === ($index === 4));
+        sicher(!str_contains($ausgabe, 'offline-e20') && !str_contains($ausgabe, 'fixture-secret'));
+        sicher($vorher === [$k->attrs, $k->puffer, $k->logs]);
+    };
+}
+foreach (['getHerkunftErfuellt', 'abgeleitetesOnlineErfuellt', 'arbeitszustandErfuellt'] as $feld) {
+    $tests['Lesediagnose isoliert ' . $feld] = function () use ($feld): void {
+        [$k, $t] = dockKonto(true);
+        shadowAendern($k, function (&$s) use ($feld): void {
+            if ($feld === 'getHerkunftErfuellt') { unset($s['statusquelle']); }
+            if ($feld === 'abgeleitetesOnlineErfuellt') { $s['online'] = true; }
+            if ($feld === 'arbeitszustandErfuellt') { $s['roh']['state'] = 'fixture-secret'; }
+        });
+        $GLOBALS['lesediagnoseKonto'] = $k;
+        $vorher = [$k->attrs, $k->puffer, $k->logs];
+        ob_start();
+        include __DIR__ . '/../../.tools/eureka-dock-shadow-lesediagnose.php';
+        $ausgabe = ob_get_clean();
+        $d = json_decode($ausgabe, true, 512, JSON_THROW_ON_ERROR);
+        sicher($d[$feld] === false && $d['meldung2Teilbedingung'] === true);
+        sicher(!str_contains($ausgabe, 'fixture-secret'));
+        sicher($vorher === [$k->attrs, $k->puffer, $k->logs] && $t->calls === []);
+        unset($GLOBALS['lesediagnoseKonto']);
+    };
+}
+foreach (observedE20Shadows() as $beobachtung) {
+    $state = $beobachtung['shadow']['state'];
+    $tests['Native Lesediagnose und Vorprüfung: beobachtetes ' . $state] = function () use ($beobachtung, $state): void {
+        [$k, $t] = dockKonto(true);
+        shadowAendern($k, function (&$s) use ($beobachtung): void { $s['roh'] = $beobachtung['shadow']; });
+        $GLOBALS['lesediagnoseKonto'] = $k;
+        $vorher = [$k->attrs, $k->puffer, $k->logs];
+        ob_start();
+        include __DIR__ . '/../../.tools/eureka-dock-shadow-lesediagnose.php';
+        $ausgabe = ob_get_clean();
+        $d = json_decode($ausgabe, true, 512, JSON_THROW_ON_ERROR);
+        sicher($d['getHerkunftErfuellt'] && $d['abgeleitetesOnlineErfuellt'] && $d['connectedFehlt']);
+        sicher($d['meldung2Teilbedingung'] === !in_array($state, ['pause', 'cleaning'], true));
+        sicher($vorher === [$k->attrs, $k->puffer, $k->logs] && $t->calls === []);
+        sicher(!str_contains($ausgabe, 'offline-e20') && !str_contains($ausgabe, 'fixture-secret'));
+        if ($d['meldung2Teilbedingung']) {
+            try { $k->EurekaDockVorpruefen(); throw new RuntimeException('Sperre fehlt'); }
+            catch (RoboHubFehler $e) { sicher(str_contains($e->getMessage(), 'erfolgreich empfangenen')); }
+        } else { sicher(str_contains($k->EurekaDockVorpruefen(), 'Verbindung unbekannt')); }
+        unset($GLOBALS['lesediagnoseKonto']);
+    };
+}
 $tests['Beobachteter E20: Unbekannt bleibt unbekannt, Vorprüfung erteilt keine Ausnahme'] = function (): void {
     [$k, $t] = dockKonto(true);
     $vorher = $k->attrs['Schnappschuss'];
