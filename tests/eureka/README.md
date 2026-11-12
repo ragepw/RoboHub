@@ -183,3 +183,12 @@ Ergebnis auf `codex-dev`, PHP 8.2.35, beide Prüfstände mit `bwrap --unshare-ne
 - PHP-Lint: **58 Dateien ohne Syntaxfehler**; `git diff --check`: fehlerfrei.
 
 Die Datenfluss-GUIDs und sämtliche `module.json` sowie Eureka-HTTPS und Token-Verwaltung bleiben unverändert. Die native IP-Symcon-9.1-Konsole wurde nicht ausgeführt; die Übernahme von `initial` und das Verschwinden der Warnung sind dort noch zu bestätigen. Ein bereits vorhandener inaktiver Virtual IO bleibt zum Schutz bestehender Konfigurationen inaktiv. Keine Cloud-Probe, Änderung produktiver Instanzen, Bereitstellung, Commit oder Push.
+
+### Erreichbarkeitsergänzung
+
+`state-test.php` prüft zusätzlich die dreistufige Anzeige aus explizitem Shadow-
+oder maximal 120 Sekunden altem Listenbefund (beide Vorzeichen, Grenzalter und
+ungültige Zeiten). `.tools/test-eureka.inc.php` prüft die zwei neuen Variablen,
+Abruffehler, unverändertes GetActivity und die Herstellerisolation im echten
+Konto-/Gerätepfad mit ersetztem Transport. Bedeutung und Grenzen:
+[Statusdokumentation](../../docs/eureka-zustaende.md#erreichbarkeit-gerätebindung-und-alter).

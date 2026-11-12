@@ -140,6 +140,39 @@ foreach ([true, false, null] as $shadow) {
         };
     }
 }
+foreach ([true, false] as $cache) {
+    foreach ([0, 120, 121, 86400, -1, null, 'invalid'] as $age) {
+        $tests['Cachealter ' . json_encode([$cache, $age])] = static function () use ($cache, $age): void {
+            $t = new StateEureka(); $d = commandDevice('pause');
+            $d['roh']['connected'] = $cache;
+            if ($age !== null) { $d['verbindungEmpfangen'] = is_int($age) ? COMMAND_NOW - $age : $age; }
+            $t->response = [['state' => 'pause', 'deviceFault' => []]];
+            $r = $t->zustand(commandBundle(), $d);
+            $fresh = is_int($age) && $age >= 0 && $age <= 120;
+            commandAssert($r['erreichbarkeit']['verbindung'] === ($fresh ? $cache : null));
+            commandAssert($r['erreichbarkeit']['quelle'] === ($fresh ? 'geraetecache.connected' : 'unbekannt'));
+            commandAssert(!$r['online'] && $r['eurekaStatus'] && count($t->calls) === 1);
+            $d['stand'] = ['deviceId' => $d['id'], 'zeit' => COMMAND_NOW,
+                'roh' => $r['roh'], 'online' => $r['online']];
+            commandError(fn() => commandPlan($d, 'start', []));
+            foreach ([true, false] as $shadow) {
+                $t->response[0]['connected'] = $shadow;
+                $r = $t->zustand(commandBundle(), $d);
+                commandAssert($r['erreichbarkeit']['verbindung'] === $shadow);
+                commandAssert($r['erreichbarkeit']['quelle'] === 'shadow.connected');
+            }
+        };
+    }
+}
+$tests['Geräteabruf versieht connected mit lokaler Empfangszeit'] = static function (): void {
+    $t = new StateEureka(); $d = commandDevice();
+    $t->response = [['deviceId' => $d['id'], 'connected' => true]];
+    $g = $t->geraete(commandBundle())[0];
+    commandAssert($g['verbindungEmpfangen'] === COMMAND_NOW);
+    $t->response = [['state' => 'pause']];
+    commandAssert($t->zustand(commandBundle(), $g)['erreichbarkeit']['verbindung'] === true);
+    commandAssert(count($t->calls) === 2);
+};
 $tests['GET wählt das Ziel statt des ersten Listeneintrags'] = static function (): void {
     $t = new StateEureka(); $d = commandDevice();
     $target = ['deviceId' => $d['id'], 'state' => 'pause', 'parentState' => 'cleaning', 'connected' => true];

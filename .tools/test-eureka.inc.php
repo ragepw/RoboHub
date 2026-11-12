@@ -9,8 +9,10 @@ class IntegrationEureka extends RoboHubEureka
 {
     public array $pfade = [];
     public ?array $shadow = null;
+    public bool $fehler = false;
     protected function transport(string $method, string $path, string $token = '', ?array $body = null): array
     {
+        if ($this->fehler) { return ['status' => 503, 'response' => '{}']; }
         $this->pfade[] = [$method, explode('?', $path)[0]];
         $payload = rtrim(strtr(base64_encode(json_encode(['exp' => time() + 3600])), '+/', '-_'), '=');
         $data = match (explode('?', $path)[0]) {
@@ -121,6 +123,60 @@ try {
     check('Unbekannter neuer Status ersetzt Pause und alte Fehlermeldung', variable(9601, 'Zustand')['value'] === -1
         && variable(9601, 'Fehler')['value'] === 'Unbekannt' && variable(9601, 'Erreichbar')['value'] === false
         && $eg->timers['Abruf'] > 0 && $eg->ReadAttributeString('Schreibbar') === '[]');
+    foreach ([true, false] as $cache) {
+        $devices = json_decode($ek->ReadAttributeString('Geraete'), true);
+        $devices[0]['roh']['connected'] = $cache;
+        $devices[0]['verbindungEmpfangen'] = time();
+        $ek->WriteAttributeString('Geraete', json_encode($devices));
+        $et->shadow = ['state' => 'cleaning', 'parentState' => 'cleaning'];
+        $before = count($et->pfade);
+        $eg->Aktualisieren();
+        $raw = json_decode($eg->Rohdaten(), true);
+        $activity = json_decode($eg->GetActivity(), true);
+        check('Frischer Cache ergänzt nur die Anzeige ' . json_encode($cache),
+            variable(9601, 'Verbindungsstatus')['value'] === ($cache ? 'Online bestätigt' : 'Offline bestätigt')
+            && variable(9601, 'CloudStatusAbruf')['value'] === true
+            && variable(9601, 'Erreichbar')['value'] === false
+            && $activity['state'] === -1 && $activity['validUntil'] === 0
+            && $raw['robohubErreichbarkeit']['quelle'] === 'geraetecache.connected'
+            && count($et->pfade) === $before + 1);
+    }
+    foreach ([true, false, null] as $connected) {
+        $et->shadow = ['state' => 'cleaning', 'parentState' => 'cleaning'];
+        if ($connected !== null) { $et->shadow['connected'] = $connected; }
+        // Bestehenden Cache gezielt altern lassen, ohne die Cloud neu abzufragen.
+        $devices = json_decode($ek->ReadAttributeString('Geraete'), true);
+        $devices[0]['verbindungEmpfangen'] = time() - 86400;
+        $ek->WriteAttributeString('Geraete', json_encode($devices));
+        $before = count($et->pfade);
+        $eg->Aktualisieren();
+        check('Eureka Cloud und Dreizustandsanzeige ' . json_encode($connected),
+            variable(9601, 'CloudStatusAbruf')['value'] === true
+            && variable(9601, 'Verbindungsstatus')['value'] === match ($connected) {
+                true => 'Online bestätigt', false => 'Offline bestätigt', null => 'Verbindung unbekannt',
+            }
+            && variable(9601, 'Erreichbar')['value'] === ($connected === true)
+            && count($et->pfade) === $before + 1);
+        $before = count($et->pfade);
+        $activity = json_decode($eg->GetActivity(), true);
+        check('GetActivity bleibt konservativ und lokal ' . json_encode($connected),
+            $activity['state'] === ($connected === true ? 1 : -1)
+            && ($connected === true || $activity['validUntil'] === 0)
+            && count($et->pfade) === $before);
+    }
+    $et->shadow['connected'] = true;
+    $eg->Aktualisieren();
+    $et->fehler = true;
+    $eg->Aktualisieren();
+    check('Cloudfehler ist keine explizite Offline-Meldung',
+        variable(9601, 'CloudStatusAbruf')['value'] === false
+        && variable(9601, 'Verbindungsstatus')['value'] === 'Verbindung unbekannt'
+        && variable(9601, 'Erreichbar')['value'] === false
+        && !isset(json_decode($eg->Rohdaten(), true)['robohubErreichbarkeit']));
+    $et->fehler = false;
+    check('Andere Hersteller erhalten keine Eureka-Variablen', count(array_filter($GLOBALS['OBJ'],
+        static fn(array $o): bool => in_array($o['ident'] ?? '', ['CloudStatusAbruf', 'Verbindungsstatus'], true)
+            && ($o['parent'] ?? 0) !== 9601)) === 0);
     $vorher = count($et->pfade);
     $blockiert = json_decode($ek->ForwardData(json_encode(['Aktion' => 'befehl', 'Geraet' => 'offline-e20', 'Befehl' => 'start'])), true);
     check('Steuerbefehle werden ohne Cloud-Aufruf abgelehnt', !$blockiert['ok'] && count($et->pfade) === $vorher);

@@ -96,6 +96,27 @@ final class RoboHubEurekaZustand
         return is_bool($p['connected'] ?? null) ? $p['connected'] : null;
     }
 
+    /**
+     * Nur Anzeige: expliziter Shadowwert vor höchstens 120 s alter Geräteliste.
+     * Die Grenze beschränkt lokales Cachealter, beweist keine Gerätefrische.
+     * Kein Ersatz für connected im Shadow bei Befehlen oder GetActivity().
+     */
+    public static function erreichbarkeit(array $shadow, array $geraet, int $jetzt): array
+    {
+        $wert = self::verbunden($shadow);
+        $cache = is_array($geraet['roh'] ?? null) ? self::verbunden($geraet['roh']) : null;
+        $zeit = $geraet['verbindungEmpfangen'] ?? null;
+        $alter = is_int($zeit) && $zeit > 0 && $zeit <= $jetzt ? $jetzt - $zeit : null;
+        $quelle = $wert !== null ? 'shadow.connected' : 'unbekannt';
+        if ($wert === null && $cache !== null && $alter !== null && $alter <= 120) {
+            $wert = $cache;
+            $quelle = 'geraetecache.connected';
+        }
+        return ['verbindung' => $wert, 'shadow' => self::verbunden($shadow),
+            'geraetecache' => $cache, 'cachealter' => $alter,
+            'quelle' => $quelle, 'empfangen' => $jetzt];
+    }
+
     /** Einzelziel-GET ohne ID erlaubt; Listen mit mehreren Einträgen brauchen IDs. */
     public static function ziel(array $result, string $id): array
     {

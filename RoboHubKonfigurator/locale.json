@@ -1,6 +1,11 @@
 {
     "translations": {
         "de": {
+            "Cloud status fetch successful": "Cloud-Statusabruf erfolgreich",
+            "Connection status": "Verbindungsstatus",
+            "Online confirmed": "Online bestätigt",
+            "Offline confirmed": "Offline bestätigt",
+            "Connection unknown": "Verbindung unbekannt",
             "\n⏳ The cloud is throttling — next attempt from %s.": "\n⏳ Die Cloud bremst — nächster Versuch ab %s Uhr.",
             "\n⚠️ The device list could not be loaded yet (%s). The configurator will try again.": "\n⚠️ Die Geräteliste ließ sich noch nicht laden (%s). Der Konfigurator versucht es erneut.",
             "\n⚠️ The mower at %s does not respond right now. RoboHub keeps trying; once it is switched on and in Wi-Fi, it appears by itself.": "\n⚠️ Unter %s antwortet der Mäher gerade nicht. RoboHub versucht es weiter; ist er eingeschaltet und im WLAN, erscheint er von selbst.",

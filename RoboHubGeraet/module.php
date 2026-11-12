@@ -80,6 +80,7 @@ class RoboHubGeraet extends IPSModule
         $this->RegisterAttributeInteger('LetzterAbruf', 0);
         $this->RegisterAttributeString('LetzterFehler', '');
         $this->RegisterAttributeString('LetzteRohdaten', '');
+        $this->RegisterAttributeString('EurekaErreichbarkeit', '');
         $this->registerFormAttributes();
 
         $this->RegisterTimer('Abruf', 0, 'ROBO_Aktualisieren($_IPS[\'TARGET\']);');
@@ -240,6 +241,11 @@ class RoboHubGeraet extends IPSModule
         $antwort = $this->frageKonto(['Aktion' => 'zustand', 'Geraet' => $this->ReadPropertyString('GeraetID')]);
         if (!$antwort['ok']) {
             $this->SetValue('Erreichbar', false);
+            if ($this->hatVariable('CloudStatusAbruf')) {
+                $this->WriteAttributeString('EurekaErreichbarkeit', '');
+                $this->SetValue('CloudStatusAbruf', false);
+                $this->SetValue('Verbindungsstatus', RoboHubText::t('Connection unknown'));
+            }
             $this->WriteAttributeString('LetzterFehler', (string)$antwort['fehler']);
             $this->SetStatus(empty($antwort['anmeldungNoetig']) ? 202 : 201);
             return '⛔ ' . $antwort['fehler'];
@@ -466,6 +472,11 @@ class RoboHubGeraet extends IPSModule
             return RoboHubText::t('ℹ️ No raw data yet — click "Update now" first.');
         }
         $daten = json_decode($roh, true);
+        $erreichbarkeit = json_decode($this->ReadAttributeString('EurekaErreichbarkeit'), true);
+        if (is_array($daten) && is_array($erreichbarkeit)) {
+            $daten['robohubErreichbarkeit'] = $erreichbarkeit;
+            $roh = (string)json_encode($daten, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        }
         $verlauf = json_decode((string)$this->ReadAttributeString('EchtzeitVerlauf'), true) ?: [];
         if (!is_array($daten) || (count($verlauf) === 0 && $this->ReadAttributeString('ZeitplanRoh') === '' && $this->ReadAttributeString('RaumEinstellungen') === '{}')) {
             return $roh;
@@ -911,6 +922,17 @@ class RoboHubGeraet extends IPSModule
         $this->WriteAttributeString('Schreibbar', (string)json_encode($schreibbar));
 
         $this->SetValue('Erreichbar', (bool)($daten['online'] ?? true));
+        // Ausschließlich vom Eureka-Treiber geliefert; keine neuen Herstellerdefaults.
+        if (($daten['eurekaStatus'] ?? false) === true) {
+            $this->WriteAttributeString('EurekaErreichbarkeit', (string)json_encode($daten['erreichbarkeit']));
+            $pres = ['PRESENTATION' => VARIABLE_PRESENTATION_VALUE_PRESENTATION];
+            $this->MaintainVariable('CloudStatusAbruf', RoboHubText::t('Cloud status fetch successful'), VARIABLETYPE_BOOLEAN, $pres, 2, true);
+            $this->MaintainVariable('Verbindungsstatus', RoboHubText::t('Connection status'), VARIABLETYPE_STRING, $pres, 3, true);
+            $this->SetValue('CloudStatusAbruf', true);
+            $this->SetValue('Verbindungsstatus', RoboHubText::t(match ($daten['erreichbarkeit']['verbindung'] ?? null) {
+                true => 'Online confirmed', false => 'Offline confirmed', default => 'Connection unknown',
+            }));
+        }
         if (isset($daten['bild']) && (string)$daten['bild'] !== $this->ReadAttributeString('Bild')) {
             $this->WriteAttributeString('Bild', (string)$daten['bild']);
         }
@@ -956,7 +978,10 @@ class RoboHubGeraet extends IPSModule
         if (isset($daten['roh'])) {
             $roh = (string)json_encode($daten['roh'], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
             $this->WriteAttributeString('LetzteRohdaten', $roh);
-            $this->SendDebug('Rohdaten', $roh, 0);
+            // Eureka-Rohdaten können individuelle Kennungen enthalten.
+            if (($daten['eurekaStatus'] ?? false) !== true) {
+                $this->SendDebug('Rohdaten', $roh, 0);
+            }
         }
     }
 

@@ -129,15 +129,73 @@ von `supportReturnDustByTime`; daraus entsteht keine RoboHub-Befehlsfreigabe.
 
 ## Erreichbarkeit, Gerätebindung und Alter
 
-Ein HTTP-200 bestätigt nur den Abruf der Cloud. `online=true` wird nur aus
-explizit booleschem `connected=true` der zugeordneten Shadow-Antwort gebildet.
-Ein explizites Shadow-`connected=true` hat für die Anzeige Vorrang vor einem
-alten negativen Gerätecache. Shadow-`false` bleibt false. Der Cache ist nur
-Diagnoseinformation und ersetzt keine fehlende Shadow-Verbindungsmeldung;
-der Cache kann bis zu einer Stunde alt sein. Strings und Zahlen werden nicht
-zu Verbindungsnachweisen umgewandelt. `erreichbarkeit` erhält den dreistufigen
-Befund (true/false/null), Quelle und lokale Empfangszeit. Im booleschen
-Symcon-Feld bedeutet false daher auch **Erreichbarkeit nicht belegt**.
+Die drei Ebenen bleiben getrennt. Ein erfolgreicher HTTP-/Cloud-/Parser-Abruf
+bestätigt den Cloud-Statusabruf, niemals eine aktuelle Geräteverbindung. Fehler
+werden weiter als Fehler zum Gerät transportiert und nicht als `connected=false`
+erfunden. Nur explizite boolesche `connected`-Werte werden ausgewertet; fehlende,
+null, Strings und Zahlen bedeuten unbekannt.
+
+Die Anzeige bewertet zuerst `shadow.connected` (true/false). Fehlt ein gültiger
+Shadowwert, darf `roh.connected` der Geräteliste einspringen, wenn deren lokale
+Empfangszeit `verbindungEmpfangen` positiv, nicht zukünftig und höchstens 120
+Sekunden alt ist. Diese konservative Anzeigegrenze ist eine lokale Regel, kein
+belegtes Cloud-Frischeversprechen. Sie gilt gleichermaßen für true und false.
+Ein älterer, fehlender oder ungültiger Zeitstempel ergibt unbekannt. Alte
+Cacheeinträge ohne Zeitstempel werden nicht beim Lesen nachträglich verjüngt.
+Die Empfangszeit wird ausschließlich beim ohnehin stattfindenden Geräteabruf
+im Eureka-Treiber ergänzt und mit der Liste unverändert gespeichert.
+
+Es gibt **keinen zusätzlichen Listenabruf**. Die Kontoaktion `geraete` lädt
+bisher bei leerer/über einer Stunde alter Liste oder ausdrücklichem `Neu` nach;
+`findeGeraet()` lädt für ein unbekanntes Ziel einmal nach. Bekannte Ziele können
+einen Cache vom Vortag behalten. Ein Shadowabruf erneuert diesen Cache nicht.
+Der globale `GeraeteStand` dient weiterhin der Listenverwaltung und wird nicht
+als Gerätezeit oder nachträglicher Einzelgeräte-Verbindungsbeleg verwendet.
+Der Nutzerbericht belegt `roh.connected=true` in der gespeicherten Liste;
+Tests belegen den Parser für beide booleschen Werte. Ob der Endpunkt bei einer
+frischen Abfrage zuverlässig die tatsächliche Verbindung meldet, wurde ohne
+Cloudzugriff nicht verifiziert. Auch ein frischer Listenbefund ist lediglich
+eine aktuelle Cloudmeldung mit unbekanntem Alter des zugrunde liegenden Signals.
+
+`erreichbarkeit` enthält `verbindung` (true/false/null, nur Anzeige), `shadow`
+und `geraetecache` (jeweils expliziter Rohbefund oder null), `cachealter`
+(Sekunden oder null bei unbekannter/ungültiger Zeit), `quelle`
+(`shadow.connected`, `geraetecache.connected`, `unbekannt`) und `empfangen`
+(lokale Shadow-Empfangszeit). Im Geräteattribut `EurekaErreichbarkeit` und in
+`ROBO_Rohdaten()` unter `robohubErreichbarkeit` ist die Bewertung nachvollziehbar.
+Bei Abruffehler wird die Bewertung entfernt; die alten Herstellerrohdaten
+bleiben der letzte erfolgreich empfangene Befund. Eureka-Rohantworten werden
+weiter gespeichert, aber nicht mehr per `SendDebug` protokolliert, da sie
+individuelle Gerätekennungen enthalten können.
+
+| IP-Symcon-Ident | Typ | Bedeutung und Grenze |
+| --- | --- | --- |
+| `Erreichbar` | Boolean, unverändert | Nur Shadow-`connected=true` ergibt true. false bedeutet offline **oder nicht belegt**, niemals zwingend offline. Auch ein positiver frischer Cache ändert diese Altvariable nicht. |
+| `CloudStatusAbruf` (neu, nur Eureka) | Boolean | Letzter Statusabruf vollständig erfolgreich; bei Konto-/Cloud-/Antwortfehler false. Keine Aussage über Geräteverbindung oder Gerätezeit. |
+| `Verbindungsstatus` (neu, nur Eureka) | String | „Online bestätigt“, „Offline bestätigt“, „Verbindung unbekannt“ nach obiger Quellenregel. Bestätigt bedeutet explizite Cloudmeldung, kein direkter Gerätehandshake. Abruffehler ergibt unbekannt. |
+
+Die neuen Variablen entstehen beim ersten erfolgreichen Eureka-Statusabruf;
+auch wenn `connected` fehlt. Es werden keine Aktionen freigegeben. Alle Anzeigen
+beschreiben den letzten Abfrageversuch, sie altern nicht durch einen neuen
+Hintergrundtimer. Nach einem gestoppten Abruf sind Werte daher weiterhin letzte
+Befunde; Empfangszeit/Cachealter dokumentieren den Auswertungszeitpunkt.
+
+`online` im normalisierten Treiberstatus und im Konto-Schnappschuss bleibt
+streng `shadow.connected===true`, unabhängig vom dreistufigen Anzeige-Fallback.
+Damit bleiben die bestehende boolesche Variable, Kachel und `GetActivity()`
+rückwärtskompatibel: Ohne positiven Shadow-Nachweis meldet `GetActivity()`
+weiter state=-1, moving=false, outsideStation=false, validUntil=0. Der gelesene
+`Zustand` selbst bleibt sichtbar. Ein erfolgreicher Shadowabruf ohne connected
+macht die Aktivität ausdrücklich nicht für Automationen verlässlich. Der
+Vertrag 1.0 bleibt unverändert; GetActivity fragt nur lokale Kontoinformationen
+ab, keine Cloud. Unbekannte Verbindung wird niemals zur Steuerfreigabe.
+
+Andere Hersteller behalten vollständig ihre bisherige Semantik: `uebernimm()`
+nutzt `online`, bei fehlendem Feld weiterhin true; Abruffehler setzen Erreichbar
+false. Beispielsweise Worx übernimmt den Listen-Onlinewert, andere Normalisierer
+liefern keinen Onlinewert. Eine herstellerübergreifend einheitliche
+Verbindungsdefinition existiert bisher nicht und wird hier nicht eingeführt.
+Weder deren Variablentypen noch GetActivity-Regeln werden geändert.
 
 Mehrere Shadow-Einträge werden über `deviceId`/`id` zugeordnet, nicht über
 Position null. Doppelte Ziele, widersprüchliche Identitäten, fehlendes Ziel,
@@ -177,7 +235,8 @@ wird umgekehrt nicht durch einen leeren Fehlercode verborgen.
 Umnummerierung als Rohwert angezeigt, ungültige Typen ausgelassen. Wie bisher
 behält Symcon optionale Variablen bei fehlenden Werten; etwa ein vorheriger
 Akkustand bleibt der letzte bekannte Messwert. Es wird keine Nullmessung erfunden.
-Neue Variablen, Auswahloptionen oder Schreibaktionen werden nicht angelegt.
+Abgesehen von den zwei Eureka-Anzeigevariablen entstehen keine neuen
+Variablen, Auswahloptionen oder Schreibaktionen.
 Nur beim bestätigten Staubentleeren ergänzt ein lesbarer Herstellerstatus das
 bisherige Rohtextformat; die vollständige Rohantwort bleibt unverändert.
 
@@ -340,3 +399,24 @@ Geänderte Dateien:
 - `.github/workflows/check-style.yml`: Zustands-/Befehlsprüfungen in CI aufgenommen.
 - `docs/eureka-zustaende.md` (neu), `docs/eureka-steuerung.md`,
   `tests/eureka/README.md`: Beleglage, Grenzen und Prüfergebnisse.
+
+## Prüfung der Erreichbarkeitsergänzung (12.11.2026)
+
+Die zusätzlichen Regressionen prüfen Shadow true/false/fehlend, frische und alte
+Listenwerte beider Vorzeichen, exakt 120/121 Sekunden, Zukunfts-/fehlende/falsche
+Zeitstempel, Vorrang des Shadows, einmaligen Status-GET ohne Listen-Nachfrage,
+Befehlssperren trotz positivem Cache sowie die echte Konto-/Geräteübergabe,
+GetActivity, Cloudfehler und das Ausbleiben neuer Variablen anderer Hersteller.
+Die native IP-Symcon-9.1-Darstellung und frische reale Listenantworten bleiben
+bis zu einer gesondert freigegebenen Prüfung offen. Keine Produktivänderung,
+Firmwareänderung, Commit, Push oder Deployment.
+
+Prüfergebnis dieser Ergänzung (PHP 8.2.35): **1185 Gesamtprüfungen,
+683 Zustandsprüfungen, 233 Befehlsprüfungen und 72 Token-/GET-Prüfungen bestanden,
+jeweils 0 Fehler**. Alle Laufzeitprüfstände liefen mit
+`bwrap --unshare-net --dev-bind / / -- php …`, ausschließlich gegen Fixtures
+und lokale Nachbauten. PHP-Lint: **67 Dateien ohne Syntaxfehler**;
+`git diff --check`: fehlerfrei. Die gemeinsame Sprachdatei wurde mit dem
+bestehenden Generator in alle drei Module übernommen. Ein zwischenzeitlicher
+lokaler iRobot-UDP-Fehler bei überlappenden Gesamtprüfständen trat im abschließenden
+einzeln ausgeführten Gesamtprüfstand nicht erneut auf.
