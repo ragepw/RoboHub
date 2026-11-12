@@ -117,7 +117,8 @@ function konto(): array
     // Ausschließlich Offline-Fixture: simuliert die separat genehmigte Bereitstellung.
     $k->puffer['EurekaB8Laufzeit'] = str_repeat('a', 64);
     $k->puffer['EurekaB8Laufzeitfreigabe'] = json_encode([
-        'erwartet' => $GLOBALS['boot'] . ':' . $k->puffer['EurekaB8Laufzeit'], 'zustand' => 'genehmigt']);
+        'erwartet' => $GLOBALS['boot'] . ':' . $k->puffer['EurekaB8Laufzeit'], 'zustand' => 'genehmigt',
+        'cloudGeraetId' => $g['id']]);
     return [$k, $t];
 }
 function frei(RoboHubKonto $k): string
@@ -134,6 +135,9 @@ function shadowAendern(RoboHubKonto $k, callable $fn): void
     $s = json_decode($k->attrs['Schnappschuss'], true); $fn($s['offline-e20']['p']);
     $k->attrs['Schnappschuss'] = json_encode($s);
 }
+
+// Der separate Import-Prüfstand verwendet dieselben lokalen Fixtures, ohne diesen Runner zu starten.
+if (defined('ROBOHUB_DIAGNOSE_NUR_FIXTURE')) { return; }
 
 $tests = [];
 foreach (['fehlt', 'falsch', 'leer', 'defekt'] as $fall) {
@@ -444,7 +448,7 @@ $tests['Monotone Frist verhindert Verlängerung durch zurückgestellte Systemuhr
     $m = new ReflectionMethod(RoboHubKonto::class, 'eurekaB8Kontext');
     $ctx = $m->invoke($k); $ctx['monoton'] = 100000;
     $f = [];
-    $laufzeit = ['erwartet' => $ctx['boot'], 'zustand' => 'genehmigt'];
+    $laufzeit = ['erwartet' => $ctx['boot'], 'zustand' => 'genehmigt', 'cloudGeraetId' => $ctx['geraet']['id']];
     $d = new RoboHubEurekaDiagnose(function () use (&$ctx): array { return $ctx; },
         function () use (&$f): array { return $f; }, function ($v) use (&$f): void { $f = $v; }, fn(callable $fn) => $fn(),
         function () use (&$laufzeit): array { return $laufzeit; },
@@ -499,6 +503,8 @@ foreach ([['status' => 200, 'response' => '{invalid'], ['status' => 200, 'respon
         sicher(!str_contains(json_encode($r), 'fixture-secret'));
     };
 }
+require __DIR__ . '/provisioning-cases.php';
+
 $fehler = 0;
 foreach ($tests as $name => $fn) {
     try { $fn(); sicher($GLOBALS['locks'] === []); echo 'OK: ' . $name . "\n"; }

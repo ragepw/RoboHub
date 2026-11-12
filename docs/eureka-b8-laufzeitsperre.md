@@ -1,5 +1,8 @@
 # Zusätzliche B8-Laufzeitsperre – lokaler Abschlussbericht
 
+Aktueller Folgestand ab `a5980e0`: [signierte administrative Bereitstellung](eureka-b8-bereitstellung.md).
+Die folgenden Aussagen zum fehlenden Bereitstellungsweg beschreiben den historischen Stand.
+
 12.11.2026, Branch `feature/eureka-e20-evo-plus`, Basis `2f034c6`.
 Vorhandene uncommittete Diagnose- und Transportänderungen wurden erhalten.
 Keine konkrete Laufzeit wurde freigeschaltet. Keine Cloud-/Geräteaufrufe,

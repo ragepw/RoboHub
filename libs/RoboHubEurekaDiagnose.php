@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/RoboHubEurekaB8.php';
 require_once __DIR__ . '/RoboHubEurekaZustand.php';
+require_once __DIR__ . '/RoboHubEurekaGenehmigung.php';
 
 /**
  * Administrativer Einmalpfad. Callbacks lesen ausschließlich lokale Kontodaten.
@@ -31,12 +32,44 @@ final class RoboHubEurekaDiagnose
         $this->laufzeitSpeichern = $laufzeitSpeichern;
     }
 
+    /** Nur signierte externe Erwartung übernehmen; niemals aus Istkennung ableiten. */
+    public function bereitstellen(string $dokument, string $publicKey): void
+    {
+        ($this->mitFreigabeSperre)(function () use ($dokument, $publicKey): void {
+            // Auch unbekannte/teilgeschriebene Zustände niemals reparieren.
+            if (($this->laufzeitLesen)() !== [] || ($this->lesen)() !== []) {
+                throw new RoboHubFehler('Eureka: Bereitstellung bereits erfolgt oder Diagnosezustand nicht leer.');
+            }
+            $k = ($this->kontext)();
+            self::pruefen($k);
+            $g = RoboHubEurekaGenehmigung::pruefen($dokument, $publicKey, $k['boot'], $k['jetzt']);
+            if (!hash_equals($g['cloudGeraetId'], $k['geraet']['id'])) {
+                throw new RoboHubFehler('Eureka: Signiertes Diagnoseziel stimmt nicht mit der lokalen Zuordnung überein.');
+            }
+            $this->laufzeitSpeichern(['erwartet' => $g['erwartet'], 'zustand' => 'genehmigt',
+                'cloudGeraetId' => $g['cloudGeraetId'],
+                'genehmigtBis' => $g['bis'],
+                'genehmigtMonotonBis' => $k['monoton'] + ($g['bis'] - $k['jetzt']) * 1000]);
+        });
+    }
+
     /** Nur unter Freigabesemaphore. Keine Erzeugung/Erneuerung der Erwartung. */
     private function laufzeitPruefen(array $k, string $zustand, ?string $ticketHash = null): array
     {
         $l = ($this->laufzeitLesen)();
+        // Ziel aus der externen Signatur beibehalten; niemals aus aktueller Zuordnung erneuern.
+        if (!is_string($l['cloudGeraetId'] ?? null) || $l['cloudGeraetId'] === '' ||
+            !is_string($k['geraet']['id'] ?? null) || !hash_equals($l['cloudGeraetId'], $k['geraet']['id'])) {
+            // Ein erkannter Zielwechsel bleibt auch nach Rückwechsel/Attributrollback gesperrt.
+            if (is_string($l['cloudGeraetId'] ?? null) && $l['cloudGeraetId'] !== '') {
+                $this->laufzeitSpeichern(array_replace($l, ['zustand' => 'widerrufen']));
+            }
+            throw new RoboHubFehler('Eureka: Signierte Gerätebindung fehlt oder wurde geändert; Diagnose gesperrt.');
+        }
         if (!is_string($l['erwartet'] ?? null) || $l['erwartet'] === '' ||
             !hash_equals($l['erwartet'], $k['boot']) || ($l['zustand'] ?? null) !== $zustand ||
+            (isset($l['genehmigtBis']) && ($k['jetzt'] >= $l['genehmigtBis'] ||
+                $k['monoton'] >= ($l['genehmigtMonotonBis'] ?? 0))) ||
             ($ticketHash !== null && (!is_string($l['ticketHash'] ?? null) ||
                 !hash_equals($l['ticketHash'], $ticketHash)))) {
             throw new RoboHubFehler('Eureka: Separate Laufzeitfreigabe fehlt, ist ungültig oder bereits verwendet.');
@@ -63,6 +96,9 @@ final class RoboHubEurekaDiagnose
             throw new RoboHubFehler('Eureka: Diagnosekontext oder Cloud-Sperre verweigert die Abfrage.');
         }
         $g = $k['geraet'] ?? [];
+        if (!is_string($g['id'] ?? null) || $g['id'] === '') {
+            throw new RoboHubFehler('Eureka: Eindeutige Cloud-Gerätebindung fehlt.');
+        }
         $ident = self::modellPruefen($g);
         $s = $g['stand'] ?? [];
         foreach ([$k['cacheZeit'] ?? null, $g['verbindungEmpfangen'] ?? null, $s['zeit'] ?? null] as $zeit) {
@@ -193,9 +229,9 @@ final class RoboHubEurekaDiagnose
         if ($f !== [] && !in_array($f['zustand'] ?? null, ['bereit', 'verbraucht', 'widerrufen'], true)) {
             throw new RoboHubFehler('Eureka: Unbekannter persistenter Diagnosezustand; kein Zurücksetzen.');
         }
-        if ($l !== []) {
-            $this->laufzeitSpeichern(array_replace($l, ['zustand' => 'widerrufen']));
-        }
+        // Auch vor der Bereitstellung ein flüchtiges Veto setzen: Attributrollback
+        // darf einen vorab ausgesprochenen Widerruf nicht entfernen.
+        $this->laufzeitSpeichern(array_replace($l, ['zustand' => 'widerrufen']));
         // Ein bereits reservierter Versuch bleibt endgültig verbraucht, sendet aber nicht.
         $this->persistieren(array_replace($f, ['zustand' => 'widerrufen']));
     }

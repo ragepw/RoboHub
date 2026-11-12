@@ -1,5 +1,32 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## Administrative Bereitstellung (lokal, 12.11.2026)
+
+[Aktueller Abschlussbericht und späterer Ablauf](../../docs/eureka-b8-bereitstellung.md).
+Extern signierter Import mit festem externen Vertrauensanker und v2-Nutzlast
+mit konkreter Cloud-Gerätebindung. Der öffentliche Moduleinstieg verlangt
+zusätzlich einen nativ bestätigten angemeldeten Administrator; fehlende APIs
+und unbekannte Kontexte sperren. Standardmäßig weiter geschlossen, keine echte
+Bereitstellung durchgeführt. Schlüssel und Dokumente entstehen nur im RAM bzw.
+in anonymen Prozesspipes. Native Benutzer-/Authentifizierungsprüfung unter
+IP-Symcon 9.1 sowie Rechte-/Buffer-/Semaphore-Prüfung bleiben Voraussetzungen
+für eine spätere Freischaltung.
+
+Aktueller Prüfstand: **175 Diagnose-/Bereitstellungs-, 19 Import-Kontext-,
+18 HTTPS-Double-, 21 native, 233 Befehls-, 683 Zustands-, 72 Token-/GET- und
+1.199 RoboHub-Prüfungen**, insgesamt **2.420**, keine Fehler;
+**76 PHP-Dateien** syntaxfehlerfrei. Vollständiger isolierter Runner:
+`bash tests/eureka/run-offline.sh`, Exitcode 0. Python-Syntax und Diff-Whitespace
+zusätzlich isoliert geprüft. Details und Grenzen im Abschlussbericht.
+
+`import-test.php` prüft fehlende Benutzer-APIs in getrennten Prozessen und den
+Moduleinstieg mit echten Signaturen. Nur die externe Public-Key-Dateigrenze
+wird für Positivfälle in einer RAM-Kopie der Modulquelle ersetzt; keine native
+Authentifizierungsprüfung und keine Schlüsseldatei auf dem Host. Sämtliche
+Testunterprozesse bleiben im gesperrten äußeren Netznamespace.
+
+Die folgenden Abschnitte dokumentieren frühere Arbeitsstände.
+
 ## Zusätzliche Laufzeitsperre (12.11.2026)
 
 Aktuelle Architektur, Herstellerbelege und Grenzen im

@@ -81,7 +81,7 @@ $k = ['konto' => 45174, 'instanz' => 22708, 'hersteller' => 'eureka', 'region' =
     'jetzt' => time(), 'monoton' => 100000, 'boot' => 'isolated-native-start', 'revision' => 'offline-session',
     'warteBis' => 0, 'kontoname' => 'offline@example.invalid', 'cacheZeit' => time(), 'geraet' => $g,
     'buendel' => ['region' => 'eu', 'access_token' => 'e30.' . base64_encode(json_encode(['exp' => time() + 3600])) . '.offline']];
-$GLOBALS['runtime'] = ['erwartet' => $k['boot'], 'zustand' => 'genehmigt'];
+$GLOBALS['runtime'] = ['erwartet' => $k['boot'], 'zustand' => 'genehmigt', 'cloudGeraetId' => $k['geraet']['id']];
 $d = new \RoboHubEurekaDiagnose(fn() => $k, fn() => $GLOBALS['state'], function ($f): void {
     if (($f['zustand'] ?? '') === 'verbraucht' && !isset($f['transportBegonnenAm'])) { $GLOBALS['consumedWrites']++; }
     $GLOBALS['state'] = $f;

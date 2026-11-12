@@ -43,7 +43,7 @@ function vorbereiten(): array
         'warteBis' => 0, 'kontoname' => 'offline@example.invalid', 'cacheZeit' => time(),
         'geraet' => $g, 'buendel' => ['region' => 'eu', 'access_token' => $token]];
     $zustand = [];
-    $laufzeit = ['erwartet' => $k['boot'], 'zustand' => 'genehmigt'];
+    $laufzeit = ['erwartet' => $k['boot'], 'zustand' => 'genehmigt', 'cloudGeraetId' => $k['geraet']['id']];
     $d = new RoboHubEurekaDiagnose(fn() => $k, function () use (&$zustand): array { return $zustand; },
         function ($f) use (&$zustand): void { $zustand = $f; }, fn(callable $fn) => $fn(),
         function () use (&$laufzeit): array { return $laufzeit; },

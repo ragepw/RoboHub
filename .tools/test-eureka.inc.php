@@ -71,6 +71,23 @@ try {
     $eg->props['Modell'] = 'E20 Evo Plus';
     $eg->ApplyChanges();
     $eg->Aktualisieren();
+    foreach (['EurekaB8Bereitstellen', 'bereitstellen'] as $importAktion) {
+        $vorImportAktion = count($et->pfade);
+        $abgewiesen = false;
+        try { $eg->RequestAction($importAktion, '{}'); }
+        catch (Exception $e) { $abgewiesen = true; }
+        check('Geräte-/Visualisierungsaktion erreicht keinen Import: ' . $importAktion,
+            $abgewiesen && count($et->pfade) === $vorImportAktion
+            && $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
+    }
+    check('Konto- und Geräteformular bieten keinen administrativen Import an',
+        !str_contains($ek->GetConfigurationForm(), 'EurekaB8Bereitstellen')
+        && !str_contains(konsole($eg->GetConfigurationForm()), 'EurekaB8Bereitstellen'));
+    $timerQuellen = file_get_contents(__DIR__ . '/../RoboHubKonto/module.php')
+        . file_get_contents(__DIR__ . '/../RoboHubGeraet/module.php');
+    preg_match_all('/\$this->RegisterTimer\([^\n]+/', $timerQuellen, $timerAufrufe);
+    check('Kein registrierter Konto-/Gerätetimer ruft den administrativen Import auf',
+        count($timerAufrufe[0]) > 0 && !str_contains(implode("\n", $timerAufrufe[0]), 'EurekaB8'));
     check('Gerätemodul erhält Eureka-Zustand und Akku über das Konto', variable(9601, 'Zustand')['value'] === RoboHubModell::ZUSTAND_REINIGT
         && variable(9601, 'Akku')['value'] === 87);
     $es = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'] ?? [];

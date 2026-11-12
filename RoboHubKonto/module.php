@@ -518,6 +518,44 @@ class RoboHubKonto extends IPSModule
         });
     }
 
+    /** Lokale Istkennung zur externen Prüfung; keine Genehmigung und kein GET. */
+    public function EurekaB8LaufzeitAnzeigen(): string
+    {
+        return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d): string {
+            $k = $this->eurekaB8Kontext();
+            RoboHubEurekaDiagnose::pruefen($k);
+            return $k['boot'];
+        });
+    }
+
+    /** Authentifizierter Administrator UND externe Signatur; kein anderer Importweg. */
+    public function EurekaB8Bereitstellen(string $genehmigung): string
+    {
+        $this->eurekaB8ImportAdministratorPruefen();
+        return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d) use ($genehmigung): string {
+            $this->eurekaB8ImportAdministratorPruefen();
+            $d->bereitstellen($genehmigung, RoboHubEurekaGenehmigung::vertrauensanker());
+            return 'Eureka: Extern genehmigte Laufzeit einmalig bereitgestellt; noch kein Transport.';
+        });
+    }
+
+    /** Nur am Import: fehlende native Prüfbarkeit ist niemals eine Berechtigung. */
+    private function eurekaB8ImportAdministratorPruefen(): void
+    {
+        try {
+            if (!function_exists('IPS_IsAdministrator') || !function_exists('IPS_GetLoggedInUser')) {
+                throw new RuntimeException();
+            }
+            $benutzer = IPS_GetLoggedInUser();
+            if (!is_string($benutzer) || trim($benutzer) === '' || $benutzer !== trim($benutzer) ||
+                $benutzer === '@unknown' || IPS_IsAdministrator() !== true) {
+                throw new RuntimeException();
+            }
+        } catch (Throwable $e) {
+            throw new RoboHubFehler('Eureka: Import erfordert einen nativ bestätigten angemeldeten Administrator.');
+        }
+    }
+
     public function EurekaB8Freigeben(int $sekunden, string $bestaetigung): string
     {
         return $this->mitEurekaB8Sperre(fn(RoboHubEurekaDiagnose $d): string =>

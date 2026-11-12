@@ -1,5 +1,8 @@
 # Administrative B8-Einmaldiagnose: Vorbereitung, kein Live-Test
 
+Aktueller Folgestand ab `a5980e0`: [signierte administrative Bereitstellung](eureka-b8-bereitstellung.md).
+Die folgenden Aussagen zum fehlenden Bereitstellungsweg beschreiben den historischen Stand.
+
 Stand 12.11.2026, Branch `feature/eureka-e20-evo-plus`, Basis `2f034c6`.
 Es wurde ausschließlich lokal implementiert und mit gesperrtem externem Netzwerk
 geprüft. Keine produktive Installation und keine echte Testfreigabe wurden vorgenommen.
