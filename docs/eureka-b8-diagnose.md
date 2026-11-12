@@ -151,6 +151,12 @@ Gerätekennungen geloggt. Fehlermeldungen enthalten keine Transport-Freitexte.
 
 ## Antwortvalidierung
 
+Erweiterung 12.11.2026: [Formate und datensparsame Strukturdiagnose](eureka-produktivvorbereitung.md#b8-antwortauswertung-im-vorhandenen-diagnosepfad).
+Neben Hex in `data`/`data.data` werden weitere `data`-Hüllen, eingebettetes
+vollständiges JSON, Bytearrays, kanonisches binäres Base64 und getrennte Hexbytes
+lokal ausgewertet. Fremde Felder und mehrdeutige Kandidaten bleiben ausgeschlossen.
+Die zusätzliche `diagnose`-Rückgabe wird weder geloggt noch persistiert.
+
 `RoboHubEurekaB8` ist ein kleiner separater Parser anhand der bereits
 [dokumentierten Offsets](eureka-zustaende.md#erwartete-arbeitsstatusantwort).
 Er prüft Hexformat, Rahmenbeginn AA, Längenbyte, B8-Kennung, reservierte

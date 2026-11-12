@@ -33,7 +33,7 @@ $tests['Maximale Länge und Query-Nachrichtentyp'] = static function (): void {
     commandAssert(strlen($hex) === 512 && substr($hex, 2, 2) === 'FF' && substr($hex, 18, 2) === '03');
     RoboHubEurekaProtokoll::pruefeRahmen($hex);
 };
-foreach ([[-1, 0, 8], [6, 0, 8], [2, -1, 8], [2, 4, 8], [2, 0, 10], [2, 0, 0]] as $i => $params) {
+foreach ([[-1, 0, 8], [0, 0, 8], [4, 0, 8], [5, 0, 8], [6, 0, 8], [2, -1, 8], [2, 4, 8], [2, 0, 10], [2, 0, 0]] as $i => $params) {
     $tests['Ungültige Reinigungsparameter ' . $i] = static fn() => commandError(fn() => RoboHubEurekaProtokoll::start(...$params));
 }
 foreach (['productModel', 'sn8', 'protoVersion', 'platform'] as $field) {
@@ -182,7 +182,8 @@ $tests['Pause nur während Reinigung'] = static function (): void {
 foreach (['cleaning', 'pause', 'stop'] as $state) {
     $tests['Station aus ' . $state] = static fn() => commandAssert(commandPlan(commandDevice($state), 'station', [])['body']['data'] === 'AA0DB80000000000000222010016');
 }
-foreach (['unknown', 'sleep', 'upgrading', 'charging_pause', 'wiping_pause', 'error', 'charging_back', 'positioning', 'on_station', ''] as $state) {
+foreach (['unknown', 'sleep', 'upgrading', 'charging_pause', 'wiping_pause', 'error', 'charging_back', 'positioning', 'on_station',
+    'collecting_dust', 'ERP_model', 'chargeWithLine', 'environmental_exploration', ''] as $state) {
     foreach (['start', 'pause', 'resume', 'station'] as $cmd) {
         $tests['Keine riskante Entscheidung ' . $state . '/' . $cmd] = static fn() => commandError(fn() => commandPlan(commandDevice($state), $cmd, []));
     }
@@ -215,6 +216,39 @@ $tests['Keine redundanten Starts oder Stationsbefehle'] = static function (): vo
     commandError(fn() => commandPlan(commandDevice('cleaning')));
     commandError(fn() => commandPlan(commandDevice('charging'), 'station', []));
 };
+foreach ([null, -1, 0, 15, 101, '87', 87.0, true, []] as $i => $akku) {
+    foreach (['stop', 'charging', 'charging_finish'] as $state) {
+        $tests['Neuer Auftrag sperrt unbestätigten/niedrigen Akku ' . $state . '/' . $i] = static function () use ($akku, $state): void {
+            $d = commandDevice($state); $d['stand']['roh']['batteryLevel'] = $akku;
+            $calls = 0;
+            $w = new RoboHubEurekaBefehlsweg(function () use (&$calls): array { $calls++; return commandResponse(); }, commandMappings());
+            commandError(fn() => $w->ausfuehren(commandBundle(), $d, 'start', ['fan' => 2, 'water' => 0, 'mode' => 8], COMMAND_NOW));
+            commandAssert($calls === 0);
+        };
+    }
+}
+$tests['Neuer Auftrag verlangt Akku, Grenzen 16 und 100 sind zulässig'] = static function (): void {
+    $d = commandDevice(); unset($d['stand']['roh']['batteryLevel']);
+    commandError(fn() => commandPlan($d));
+    foreach ([16, 100] as $akku) {
+        $d['stand']['roh']['batteryLevel'] = $akku;
+        commandAssert(commandPlan($d)['aktion'] === 'start');
+    }
+};
+$tests['Pause, Fortsetzen und Dock setzen keine neue Akkuschwelle voraus'] = static function (): void {
+    foreach ([['cleaning', 'pause'], ['pause', 'start'], ['cleaning', 'station']] as [$state, $cmd]) {
+        $d = commandDevice($state); $d['stand']['roh']['batteryLevel'] = 5;
+        commandAssert(commandPlan($d, $cmd, [])['aktion'] === ($cmd === 'start' ? 'resume' : $cmd));
+    }
+};
+foreach ([null, ['fixture-secret'], 'unknown'] as $i => $fault) {
+    $tests['Negativer Cache-Fehlerbefund sperrt alle vorbereiteten Aktionen ' . $i] = static function () use ($fault): void {
+        foreach ([['stop', 'start'], ['cleaning', 'pause'], ['pause', 'station']] as [$state, $cmd]) {
+            $d = commandDevice($state); $d['roh']['deviceFault'] = $fault;
+            commandError(fn() => commandPlan($d, $cmd, $cmd === 'start' ? ['fan' => 2, 'water' => 0, 'mode' => 8] : []));
+        }
+    };
+}
 foreach (['id', 'deviceId'] as $field) {
     foreach (['other-device', [], null] as $i => $value) {
         $tests['Status mit falscher Gerätebindung ' . $field . ' ' . $i] = static function () use ($field, $value): void {

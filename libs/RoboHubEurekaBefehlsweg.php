@@ -49,6 +49,9 @@ final class RoboHubEurekaBefehlsweg
         if (array_key_exists('connected', $geraet['roh']) && $geraet['roh']['connected'] !== true) {
             throw new RoboHubFehler('Eureka: Geräteidentifikation meldet kein verbundenes Gerät.');
         }
+        if (array_key_exists('deviceFault', $geraet['roh']) && $geraet['roh']['deviceFault'] !== []) {
+            throw new RoboHubFehler('Eureka: Gerätecache meldet keinen fehlerfreien Zustand.');
+        }
         $state = $roh['state'] ?? null;
         $bewertung = RoboHubEurekaZustand::shadow($roh);
         // charging_pause/wiping_pause können eine andere Wiederaufnahme erfordern.
@@ -68,6 +71,12 @@ final class RoboHubEurekaBefehlsweg
             $aktion = 'resume';
             $hex = RoboHubEurekaProtokoll::fortsetzen();
         } elseif ($befehl === 'start' && in_array($gruppe, ['idle', 'docked'], true)) {
+            // Hersteller-Hauptbedienung: neuer Auftrag nur oberhalb 15 Prozent.
+            // Fehlender/ungültiger Befund ist keine Erlaubnis. Pause/Resume/Dock
+            // erhalten diese Schranke nicht; sie liegen im Plugin davor.
+            if (!is_int($roh['batteryLevel'] ?? null) || $roh['batteryLevel'] <= 15 || $roh['batteryLevel'] > 100) {
+                throw new RoboHubFehler('Eureka: Neuer Auftrag benötigt einen bestätigten Akkustand über 15 Prozent.');
+            }
             $keys = array_keys($parameter);
             sort($keys);
             if ($keys !== ['fan', 'mode', 'water'] || !is_int($parameter['fan']) ||

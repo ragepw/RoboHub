@@ -507,6 +507,7 @@ foreach ([['status' => 200, 'response' => '{invalid'], ['status' => 200, 'respon
         sicher(!str_contains(json_encode($r), 'fixture-secret'));
     };
 }
+require __DIR__ . '/b8-response-cases.php';
 require __DIR__ . '/provisioning-cases.php';
 require __DIR__ . '/runtime-display-cases.php';
 

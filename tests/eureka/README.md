@@ -1,5 +1,14 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## B8-Parser und Steuerungsvorbereitung, 12.11.2026
+
+Aktuelle Beleglage, Formatvertrag und Grenzen:
+[Produktivvorbereitung](../../docs/eureka-produktivvorbereitung.md).
+`b8-response-cases.php` wird vom bestehenden `diagnostic-test.php` eingebunden;
+keine eigene Infrastruktur und keine Live-Probe. Der vollständige Lauf bleibt
+`bash tests/eureka/run-offline.sh`, einschließlich PHP-Lint und Diffprüfung.
+Alle Befehls-, Zuordnungs- und Transportsperren bleiben geschlossen.
+
 ## B8-Import ohne POSIX (12.11.2026, Basis 178c56b)
 
 [Änderung und Sicherheitsgrenzen](../../docs/eureka-b8-bereitstellung.md#aktualisierung-ip-symcon-91-ohne-posix-12112026).

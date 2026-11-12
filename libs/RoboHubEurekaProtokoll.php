@@ -27,21 +27,36 @@ final class RoboHubEurekaProtokoll
 
     public static function pruefeRahmen(string $hex): void
     {
-        if (strlen($hex) < 24 || strlen($hex) > 512 || strlen($hex) % 2 !== 0 || !ctype_xdigit($hex)) {
-            throw new RoboHubFehler('Eureka: Ungültiger Protokollrahmen.');
+        if (strlen($hex) % 2 !== 0 || !ctype_xdigit($hex)) {
+            throw new RoboHubFehler('Eureka: Protokollrahmen benötigt vollständige Hexbytes.');
+        }
+        if (strlen($hex) < 24 || strlen($hex) > 512) {
+            throw new RoboHubFehler('Eureka: Rahmenlänge außerhalb 12 bis 256 Bytes.');
         }
         $b = array_values(unpack('C*', hex2bin($hex)));
-        if ($b[0] !== 0xAA || $b[1] !== count($b) - 1 || $b[2] !== 0xB8 ||
-            array_slice($b, 3, 6) !== [0, 0, 0, 0, 0, 0] ||
-            !in_array($b[9], [2, 3], true) || (array_sum(array_slice($b, 1)) & 0xFF) !== 0) {
-            throw new RoboHubFehler('Eureka: Rahmenkopf, Länge, Typ oder Prüfsumme ungültig.');
+        // Dieselben Prüfbedingungen, getrennte feste Fehler ohne Rohdaten.
+        if ($b[0] !== 0xAA || $b[2] !== 0xB8) {
+            throw new RoboHubFehler('Eureka: Rahmenkopf ungültig.');
+        }
+        if ($b[1] !== count($b) - 1) {
+            throw new RoboHubFehler('Eureka: Rahmenlänge ungültig.');
+        }
+        if (array_slice($b, 3, 6) !== [0, 0, 0, 0, 0, 0]) {
+            throw new RoboHubFehler('Eureka: Reservierte Rahmenbytes ungültig.');
+        }
+        if (!in_array($b[9], [2, 3], true)) {
+            throw new RoboHubFehler('Eureka: Rahmentyp ungültig.');
+        }
+        if ((array_sum(array_slice($b, 1)) & 0xFF) !== 0) {
+            throw new RoboHubFehler('Eureka: Rahmenprüfsumme ungültig.');
         }
     }
 
     public static function start(int $fan, int $water, int $mode): string
     {
-        // Ausschließlich expliziter Ganzhausauftrag. Keine Referenz-Defaults.
-        if (!in_array($fan, [0, 1, 2, 3, 4, 5], true) || $water < 0 || $water > 3 || $mode !== 8) {
+        // E20-Plugin 2.5.4 bietet nur 1/2/3 an; allgemeine Enums sind kein
+        // E20-Nachweis. Ausschließlich expliziter Ganzhausauftrag, keine Defaults.
+        if (!in_array($fan, [1, 2, 3], true) || $water < 0 || $water > 3 || $mode !== 8) {
             throw new RoboHubFehler('Eureka: Nicht bestätigte Reinigungsparameter.');
         }
         return self::rahmen([0x22, 0x02, 0, 2, 0, $mode, $fan, 0, $water, 0, 0], 2);

@@ -99,6 +99,27 @@ try {
         && $et->normalisiere('E20 Evo Plus', ['state' => 'pause'])['werte']['Zustand'] === RoboHubModell::ZUSTAND_PAUSIERT);
     check('Eureka-Statusabruf und Token-Erneuerung behalten ihre Timer', $eg->timers['Abruf'] === 30000
         && ($ek->timers['Erneuern'] ?? 0) > 0);
+    foreach ([['Starten', RoboHubModell::BEFEHL_START], ['Anhalten', RoboHubModell::BEFEHL_PAUSE],
+        ['ZurStation', RoboHubModell::BEFEHL_STATION]] as [$methode, $aktion]) {
+        $vorBefehl = count($et->pfade);
+        $vorZustand = variable(9601, 'Zustand')['value'];
+        $vorAkku = variable(9601, 'Akku')['value'];
+        $vorStand = $ek->ReadAttributeString('Schnappschuss');
+        $text = $eg->$methode();
+        $eg->RequestAction('Befehl', $aktion);
+        check('Native Eureka-Aktion bleibt ohne Transport und Zustandsänderung: ' . $methode,
+            str_contains($text, 'Steuerbefehle noch nicht freigegeben')
+            && count($et->pfade) === $vorBefehl && $ek->ReadAttributeString('Schnappschuss') === $vorStand
+            && variable(9601, 'Zustand')['value'] === $vorZustand && variable(9601, 'Akku')['value'] === $vorAkku
+            && $eg->timers['Abruf'] === 30000);
+        // Ein eventuell erhaltener Aktionswert darf beim Kernelstart nicht abgespielt werden.
+        $eg->SetValue('Befehl', $aktion);
+        $eg->MessageSink(0, 0, IPS_KERNELMESSAGE, [KR_READY]);
+        $ek->MessageSink(0, 0, IPS_KERNELMESSAGE, [KR_READY]);
+        check('Kernelstart löst keinen Eureka-Befehl aus: ' . $methode,
+            count($et->pfade) === $vorBefehl && $ek->ReadAttributeString('Schnappschuss') === $vorStand
+            && $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
+    }
     foreach ([['pause', 'cleaning', 2, 120000], ['charging_back', 'cleaning', 3, 30000],
         ['charging', 'sleep', 4, 120000], ['charging_finish', 'sleep', 5, 120000],
         ['sleep', '', 8, 120000], ['stop', '', 0, 120000], ['unknown', 'cleaning', -1, 120000],

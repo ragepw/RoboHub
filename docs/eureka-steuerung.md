@@ -1,5 +1,10 @@
 # Eureka E20 Evo Plus: lokal vorbereiteter Befehlsweg
 
+Aktueller Stand 12.11.2026: [Produktivvorbereitung](eureka-produktivvorbereitung.md)
+mit erneutem Herstellerbeleg für Start/Pause/Station, engeren Startparametern
+(Fan 1–3, Akku über 15 %), erweitertem B8-Antwortparser und nativen
+Aktions-/Neustarttests. Alle Produktiv- und Transportsperren bleiben geschlossen.
+
 Aktueller Zusatz ab Basis `2f034c6`: Die separat autorisierte
 [B8-Einmaldiagnose](eureka-b8-diagnose.md) bereitet ausschließlich eine spätere
 Arbeitsstatusabfrage vor. Sie ersetzt den untenstehenden historischen Plan
@@ -111,7 +116,9 @@ ist kein bestätigter Gerätezeitstempel; die Frische des Shadow selbst bleibt o
 - `start` bei `pause` → ausschließlich Fortsetzen; keine neuen Parameter.
 - `start` bei `stop`, `charging`, `charging_finish` → neuer Auftrag;
   explizite Integerparameter `fan`, `water`, `mode` erforderlich, keine Defaults.
-  Referenzwerte: fan 0–5, water 0–3, ausschließlich mode 8 (Ganzhaus).
+  Aktuell: fan 1–3 (E20-Pluginauswahl), water 0–3, ausschließlich mode 8
+  (Ganzhaus), bestätigter Akku als Integer 16–100. Frühere Referenzgrenze fan
+  0–5 wurde bewusst auf die belegte E20-Auswahl beschränkt.
 - `pause` ausschließlich bei `cleaning`.
 - `station` ausschließlich bei `cleaning`, `pause` oder `stop`.
 - Unbekannte Zustände, `sleep`, Update, Rückfahrt, `charging_pause` und
