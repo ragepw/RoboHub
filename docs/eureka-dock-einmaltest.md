@@ -2,7 +2,9 @@
 
 Lokaler Entwicklungsstand, 12.11.2026, Branch `feature/eureka-e20-evo-plus`,
 Basis `c763b5c` plus vorhandene lokale Dokumentation/Tests. Keine Bereitstellung, Cloud-Verbindung, reale RequestAction,
-Geräteansteuerung, Signaturerzeugung, Signaturimport, Commits oder Pushs.
+Geräteansteuerung, reale Signaturerzeugung/-importe, Commits oder Pushs.
+
+Ergänzung: [Externer Dock-v2-Signierer, Offline-Kryptografie und sichere Schrittfolge](eureka-dock-signierung.md).
 
 ## Umsetzung
 
@@ -44,9 +46,9 @@ Vertrauensanker verwendet:
   Dock-Laufzeitkennung; unabhängig von B8. `von`/`bis`: ganze Unixsekunden,
   höchstens 60 Sekunden Abstand, `von <= jetzt < bis`.
 
-Es wurde kein Dock-Signierwerkzeug ausgeführt oder ergänzt. Der bestehende
-B8-Signierer bleibt auf B8 beschränkt. Ein echtes Dock-Dokument muss später
-außerhalb von Symcon von der autorisierten Schlüsselverwaltung erstellt werden.
+Der separate [Dock-v2-Signierer](eureka-dock-signierung.md) ist lokal ergänzt
+und mit flüchtigen Testschlüsseln geprüft. Der bestehende B8-Signierer bleibt
+auf B8 beschränkt. Reale Dokumente werden ausschließlich extern autorisiert.
 
 Attribute: `EurekaDockVersuch`; Buffer: `EurekaDockLaufzeit` und
 `EurekaDockLaufzeitfreigabe`. B8 verwendet weiterhin ausschließlich seine
@@ -184,29 +186,17 @@ Ankunft an der Station.
 ## Offline-Nachweise
 
 Ausführung: `bash tests/eureka/run-dock-offline.sh`. Der Runner erzwingt
-`bwrap --unshare-net` ohne Fallback. Signatur- und Schlüsselgeneratoren sind
-zusätzlich per PHP deaktiviert. Er führt den Dock-Prüfstand, die gemeinsamen
-HTTPS-Doubles, die B8-Diagnose ohne signaturerzeugende Provisionierungsfälle,
-Befehls-, Zustands-, Token- und Gesamtintegrationstests sowie alle PHP-Lints
-und `git diff --check` aus.
+`bwrap --unshare-net` ohne Fallback. Der neue separate kryptografische Prüfstand
+prüft den CLI-Signierer, native Ed25519-Signaturen und positive/negative
+Dock-Moduleinstiegsimporte mit rein flüchtigen Testschlüsseln und deaktiviertem
+cURL. Details und Grenzen: [Dock-Signierung](eureka-dock-signierung.md#offline-nachweise).
 
-Aktuelles Ergebnis siehe [Online-Nachweis und Offline-Prüfung](eureka-dock-online-nachweis.md#offline-gegenproben).
-Der Lauf erfolgt mit deaktivierten Ed25519-Signatur-/Schlüsselgeneratoren.
-
-Die neuen Dock-Tests verwenden ausschließlich erfundene Konten/IDs und im
-Testspeicher simulierte genehmigte Zustände. Es wird kein signiertes Dokument
-importiert. Die Dokumentprüfung läuft zusätzlich mit ersetzter Ed25519-Grenze:
-Zweck, Dock-Frame, Zeitfenster, Konto, Instanz und Laufzeit werden im echten
-Parser geprüft. Die native Ed25519-Grenze weist die fiktiven Signaturbytes ab.
-Die v2-Gegenproben prüfen explizite Einwilligung, fehlende/ungültige Felder,
-Zwecktrennung und eine ungültige Signatur. Erfolgreiche Genehmigungen werden
-ausschließlich im Testspeicher simuliert, ohne Importfunktion oder echte Signatur.
-Ein positiver kryptografischer Dock-Import bleibt wegen des ausdrücklichen
-Verbots von Signaturerzeugung/-import in dieser Arbeit ungeprüft.
-Die bestehenden Signierer-/Import-/Root-Import-Prüfstände wurden deshalb nicht
-ausgeführt. Der unveränderte native libcurl-Gegenprüfstand wurde in diesem
-Auftrag nicht erneut ausgeführt; der verwendete gemeinsame HTTPS-Code wird
-hier mit vollständig ersetzter cURL-Systemgrenze geprüft.
+Die bisherigen Dock-Zustands-, HTTPS-Double-, B8-Diagnose-, Befehls-, Zustands-,
+Token- und Integrationstests laufen weiterhin mit deaktivierten Signaturgeneratoren.
+Alle PHP-Dateien werden gelintet; `git diff --check` gehört zum Runner.
+Die älteren Parser-Gegenproben mit ersetzter Ed25519-Grenze bleiben zusätzlich
+bestehen. Der neue Prüfstand ergänzt den zuvor fehlenden positiven
+kryptografischen Import, ohne den Produktivanker anzulegen oder zu ersetzen.
 
 ## Voraussetzungen des späteren realen Funktionstests
 
@@ -240,8 +230,9 @@ Gerätezeit. Auch nach Vor-Ort-Bestätigung kann die Verbindung ausfallen; eine
 Cloud-Annahme beweist weder Bewegung noch Ankunft. Der Roboter kann verzögert
 auf einen bereits versandten Befehl reagieren. Ein Widerruf nach Transportbeginn
 stoppt den Roboter nicht; normale Stoppbefehle bleiben gesperrt. Die Beaufsichtigung
-muss deshalb bis zum geklärten Ergebnis bestehen bleiben. Native Symcon-Laufzeit,
-reales Geräteverhalten und ein positiver kryptografischer Dock-Import wurden
-hier nicht geprüft. Die oben beschriebenen Root-/Rollback-/fsync-Grenzen gelten
+muss deshalb bis zum geklärten Ergebnis bestehen bleiben. Native Symcon-Laufzeit
+und reales Geräteverhalten wurden hier nicht geprüft. Ein positiver kryptografischer
+Dock-Import wurde ausschließlich im Offline-Harness geprüft. Die oben beschriebenen
+Root-/Rollback-/fsync-Grenzen gelten
 weiter. Der nächste Schritt ist ein Review dieses lokalen Stands; Bereitstellung,
 Schlüsselverwaltung und realer Funktionstest erfordern einen separaten Auftrag.
