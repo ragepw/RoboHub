@@ -1,5 +1,10 @@
 # Eureka E20 Evo Plus: lokal vorbereiteter Befehlsweg
 
+Aktueller Zusatz ab Basis `2f034c6`: Die separat autorisierte
+[B8-Einmaldiagnose](eureka-b8-diagnose.md) bereitet ausschließlich eine spätere
+Arbeitsstatusabfrage vor. Sie ersetzt den untenstehenden historischen Plan
+eines Pause-Tests. Sämtliche normalen Steuerbefehle bleiben gesperrt.
+
 Stand: 11.11.2026, `codex-dev`, Branch `feature/eureka-e20-evo-plus`, Ausgangscommit
 `bb8a926`. Ausschließlich Offline-Implementierung. Kein Zugriff auf produktive Konten,
 Geräte oder den produktiven IP-Symcon-Server; keine Cloud-Proben.

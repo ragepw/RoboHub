@@ -1,5 +1,103 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## Zusätzliche Laufzeitsperre (12.11.2026)
+
+Aktuelle Architektur, Herstellerbelege und Grenzen im
+[Abschlussbericht](../../docs/eureka-b8-laufzeitsperre.md).
+Der separate flüchtige Buffer `EurekaB8Laufzeitfreigabe` fehlt standardmäßig.
+Der Modulcode erzeugt oder erneuert die erwartete Laufzeitkennung niemals.
+Bereits die Ticketausstellung verbraucht die einmalige Ausstellungsbefugnis;
+Reservierung, Transportbeginn und Widerruf sind endgültige Übergänge.
+Attributrollback allein ermöglicht keine erneute Freigabe, auch nach Neustart.
+Es gibt keine konkrete administrative Bereitstellung in diesem Arbeitsstand.
+
+Finaler isolierter Offline-Lauf: **130 Diagnose-, 18 HTTPS-Double-, 21 native,
+233 Befehls-, 683 Zustands-, 72 Token-/GET- und 1.194 RoboHub-Prüfungen**,
+insgesamt **2.351**, keine Fehler. **72 PHP-Dateien** ohne Syntaxfehler;
+Python-Syntax und `git diff --check` fehlerfrei. Zusätzlich Diff-Whitespace
+aller neuen Dateien geprüft. Transportquelle gegenüber dem vorgefundenen
+Arbeitsstand bytegleich erhalten. Native Symcon-Eigenschaften bleiben ungetestet.
+
+Die folgenden Transportergebnisse dokumentieren den vorherigen Stand;
+dessen Rollback-Lücke ist mit der zusätzlichen Laufzeitsperre geschlossen.
+
+## B8-Transportkorrektur: native Gegenversuche (12.11.2026)
+
+[Ausführlicher Sicherheits- und Persistenzbericht](../../docs/eureka-b8-transportsicherheit.md).
+Die bestehende Einmaldiagnose bleibt administrativ begrenzt, normale Befehle
+bleiben gesperrt. Der gemeinsame Transport bricht bei fehlerhafter
+cURL-Konfiguration vor I/O ab und schließt das Handle. Nur die Diagnose erzwingt
+HTTP/1.1, eine frische Verbindung, keine Wiederverwendung, kein Expect und keine
+HTTP-/Proxy-Authentifizierungsverhandlung bzw. Umgebungsproxys.
+
+`bash tests/eureka/run-offline.sh` führt zusätzlich **21 native HTTPS-Gegenversuche**
+aus. `diagnostic-native-test.py` verlangt den vom Runner gesetzten äußeren
+Netznamespace und ein isoliertes `lo`-Interface; ein unsicherer Fallback fehlt.
+Der temporäre TLS-Gegenserver nutzt eine eigene Test-CA, echte TLS-Prüfung und
+nur Standardbibliotheken. `diagnostic-native-client.php` instrumentiert die
+cURL-Systemgrenze derselben Produktivquelldatei; sämtliche exec-Aufrufe sind nativ.
+CA, CONNECT_TO-Umleitung und unsichere Kontrolloptionen existieren nur im Test.
+Keine zweite produktive Transportimplementierung, kein zusätzlicher Dienst.
+
+Mit PHP 8.2.35 / libcurl 7.88.1 / OpenSSL 3.0.22 reproduziert die HTTP/2-Kontrolle
+**zwei vollständige POSTs aus einem exec**. Nach Korrektur: **ein POST**, ALPN
+`http/1.1`, `CURLINFO_HTTP_VERSION=2` (Enum für HTTP/1.1). Auch HTTP/1.1 allein
+kann bei einer absichtlich wiederverwendeten Verbindung zwei vollständige POSTs
+senden; `FRESH_CONNECT` verhindert diesen reproduzierten Pfad. Bei nativem
+Options-Teilfehler: **0 exec, 0 TCP-Verbindungen, 0 POSTs**, Handle geschlossen.
+Abbrüche vor/nach Body, 15-Sekunden-Timeout, abgeschnittene Antwort, Expect/417
+und HTTP 401/429/500 sowie Redirectantworten sind abgedeckt.
+
+Vorheriger Stand: **115 Diagnose-, 18 HTTPS-Double-, 21 native, 233 Befehls-, 683 Zustands-,
+72 Token-/GET- und 1.189 RoboHub-Prüfungen**, insgesamt **2.331**, keine Fehler.
+**72 PHP-Dateien** syntaxfehlerfrei; Python-Syntax und Diff-Whitespace geprüft.
+Die Persistenzmodelle unterscheiden ein altes Ticket von einer neuen ausdrücklich
+administrativen Freigabe bei verlorenem Verbrauch. Native Symcon-Absturzpersistenz
+bleibt unbestätigt. HTTP/1.1 und die Testzahlen garantieren keine genau einmalige
+Verarbeitung in Cloud oder Gerät. Keine externen Anfragen, Produktivänderungen,
+Commits, Pushs oder Deployments.
+
+Die folgenden Ergebnisse beschreiben den ursprünglichen Implementierungsstand.
+
+## B8-Einmaldiagnose (12.11.2026, Basis 2f034c6)
+
+Der neue ausschließlich administrative Konto-Einstieg ist in
+[eureka-b8-diagnose.md](../../docs/eureka-b8-diagnose.md) beschrieben. Keine echte
+Freigabe, kein Live-Test und kein Deployment wurden durchgeführt. Normalbefehle
+bleiben gesperrt. Der spätere Test erlaubt einen lokalen Arbeitsstatus-Transportversuch;
+die oben beschriebenen Zustellgrenzen gelten.
+
+Vollständige lokale Prüfung mit blockiertem externem Netzwerk:
+
+```sh
+bash tests/eureka/run-offline.sh
+```
+
+`diagnostic-test.php` prüft den echten Konto-Einstieg einschließlich Freigaben,
+persistenten Verbrauch, Parallelität, Neustart, Widerruf, Tokenrotation,
+Cache-/Shadow-Bedingungen, HTTP-/Cloudfehler und B8-Parser. Der zusätzliche
+`diagnostic-http-test.php` führt den echten gemeinsamen HTTPS-Code mit ersetzten
+cURL-Funktionen aus und prüft Host, POST, Body, Timeouts und Redirects. Er muss
+mit `-d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo,curl_close`
+gestartet werden; ohne diese Absicherung bricht er ab.
+
+Abschlussprüfung unter PHP 8.2.35 mit `bwrap --unshare-net`:
+
+| Prüfstand | Bestanden | Fehler |
+| --- | ---: | ---: |
+| Neue Konto-/Diagnoseprüfungen | 111 | 0 |
+| Neue gemeinsame HTTPS-/cURL-Prüfungen | 13 | 0 |
+| Bestehende Befehlsprüfungen | 233 | 0 |
+| Bestehende Zustandsprüfungen | 683 | 0 |
+| Bestehende Token-/GET-Prüfungen | 72 | 0 |
+| Vollständiger RoboHub-Prüfstand, einschließlich anderer Hersteller | 1.189 | 0 |
+
+Gesamt: **2.301 Prüfungen bestanden**. **71 PHP-Dateien** ohne Syntaxfehler;
+`git diff --check` fehlerfrei. Die cURL-Prüfungen verwenden ausschließlich lokale
+Doubles. Kein Zugriff auf Cloud, produktives IP-Symcon oder Geräte; kein Commit,
+Push oder Deployment. Native Laufzeit, Gerätefrische und tatsächlicher Endpunkt
+bleiben unbestätigt.
+
 Alle automatischen Eureka-Prüfungen laufen ohne Hersteller-Cloud:
 
 ```sh

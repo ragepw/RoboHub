@@ -274,7 +274,8 @@ Schema: `AA LL B8 00 00 00 00 00 00 03 BODY CS`;
 `LL = Gesamtlänge - 1`; `CS = -Summe(Byte 1 bis vor CS) & FF`.
 Dies ist eine additive Prüfsumme, keine CRC8 oder Authentisierung. Die Tests
 berechnen die Rahmen ausschließlich als lokale Daten mit dem vorhandenen
-allgemeinen Rahmenbauer. Es gibt keine neuen transportfähigen Abfragefunktionen.
+allgemeinen Rahmenbauer. Seit Basis `2f034c6` existiert ausschließlich die separat
+autorisierte [B8-Einmaldiagnose](eureka-b8-diagnose.md) für `32 01`.
 
 ### Erwartete Arbeitsstatusantwort
 
@@ -317,8 +318,9 @@ Nicht übernommene Werte können deshalb in der Plugin-UI alt bleiben.
 Statuspush ist ein anderer Rahmen: Typ 04, Präfix `42`, Arbeitsstatus an Byte 11,
 Modus 15, Fan 16, Akku 21, Erweiterungsnibbles 31, Schlafuntertyp 46. Fehlerpush
 verwendet Präfix `A3`, Klasse/Code an 11/12. Diese Formate dürfen nicht mit der
-`32 01`-Antwort verwechselt werden. Ein neuer Push-/Antwortparser wird nicht
-implementiert. Fehlerklassen: 0 ohne Fehler, 1 behebbar, 2 Neustart, 3 Warnung.
+`32 01`-Antwort verwechselt werden. Der separate kleine `RoboHubEurekaB8`-Parser
+prüft nur die administrative Arbeitsstatusantwort; Push bleibt unimplementiert.
+Fehlerklassen: 0 ohne Fehler, 1 behebbar, 2 Neustart, 3 Warnung.
 
 ### Erwartete Fähigkeitsantwort
 

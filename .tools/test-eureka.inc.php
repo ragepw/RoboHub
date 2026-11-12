@@ -29,6 +29,7 @@ try {
     unset($GLOBALS['robohubTreiberFabrik']);
     $ek = new RoboHubKonto(9600);
     $ek->Create();
+    check('Create erteilt keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
     $ek->props['Hersteller'] = 'eureka';
     $auswahl = new ReflectionMethod(RoboHubKonto::class, 'treiber');
     check('Eureka ist registriert und wird als echter Treiber ausgewählt', $auswahl->invoke($ek) instanceof RoboHubEureka
@@ -39,6 +40,11 @@ try {
     $ek->props['Passwort'] = 'offline-password';
     $ek->props['Region'] = 'eu';
     check('Eureka-Anmeldung über Konto erfolgreich, Passwort verworfen', str_contains($ek->Anmelden(), '✅') && $ek->props['Passwort'] === '');
+    check('Anmeldung erteilt keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
+    $ek->ApplyChanges();
+    check('ApplyChanges und Modulübernahme erteilen keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
+    $ek->MessageSink(0, 0, IPS_KERNELMESSAGE, [KR_READY]);
+    check('Kernelstart erteilt keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
     $eb = json_decode($ek->ReadAttributeString('Buendel'), true);
     check('Eureka speichert Token-Bündel und Sitzungsrevision ohne Passwort', isset($eb['access_token'], $eb['refresh_token'])
         && $ek->ReadAttributeString('BuendelRevision') !== '' && !str_contains(json_encode($eb), 'offline-password'));
@@ -177,6 +183,7 @@ try {
     check('Andere Hersteller erhalten keine Eureka-Variablen', count(array_filter($GLOBALS['OBJ'],
         static fn(array $o): bool => in_array($o['ident'] ?? '', ['CloudStatusAbruf', 'Verbindungsstatus'], true)
             && ($o['parent'] ?? 0) !== 9601)) === 0);
+    check('Status und Geräteaktualisierung erteilen keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
     $vorher = count($et->pfade);
     $blockiert = json_decode($ek->ForwardData(json_encode(['Aktion' => 'befehl', 'Geraet' => 'offline-e20', 'Befehl' => 'start'])), true);
     check('Steuerbefehle werden ohne Cloud-Aufruf abgelehnt', !$blockiert['ok'] && count($et->pfade) === $vorher);

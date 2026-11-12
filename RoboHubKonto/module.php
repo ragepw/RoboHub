@@ -120,6 +120,8 @@ class RoboHubKonto extends IPSModule
 
         $this->RegisterAttributeString('Buendel', '');
         $this->RegisterAttributeString('BuendelRevision', '');
+        // Administrativer B8-Einmalversuch; verbrauchte Einträge niemals automatisch löschen.
+        $this->RegisterAttributeString('EurekaB8Diagnose', '{}');
         // Zweistufige Anmeldung (Ecovacs-Gerätebestätigung): Zwischenstand bis zum Code.
         $this->RegisterAttributeString('AnmeldeVorstufe', '');
         $this->RegisterAttributeString('Geraete', '[]');
@@ -493,6 +495,170 @@ class RoboHubKonto extends IPSModule
                 'anmeldungNoetig' => ($e instanceof RoboHubFehler) && $e->anmeldungNoetig,
             ]);
         }
+    }
+
+    /** Nur expliziter administrativer Skriptaufruf; kein ForwardData/RequestAction/UI/Timer. */
+    public function EurekaB8Vorpruefen(bool $frischeListe): string
+    {
+        return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d) use ($frischeListe): string {
+            if ($frischeListe) {
+                $lokal = $this->eurekaB8Kontext();
+                RoboHubEurekaDiagnose::modellPruefen($lokal['geraet']);
+                // Bewusst genau ein GET mit vorhandenem Token, ohne Refresh oder Retry.
+                $b = $this->eurekaB8Buendel();
+                $t = $this->treiberNeu();
+                if (!$t instanceof RoboHubEureka) { throw new RoboHubFehler('Eureka: Diagnosetreiber fehlt.'); }
+                $t->beiUnauthorized = null;
+                $geraete = $t->geraete($b);
+                $this->WriteAttributeString('Geraete', json_encode($geraete, JSON_THROW_ON_ERROR));
+                $this->WriteAttributeInteger('GeraeteStand', time());
+            }
+            RoboHubEurekaDiagnose::pruefen($this->eurekaB8Kontext());
+            return 'Eureka: Lokale Diagnosevorprüfung bestanden; keine Testfreigabe erteilt.';
+        });
+    }
+
+    public function EurekaB8Freigeben(int $sekunden, string $bestaetigung): string
+    {
+        return $this->mitEurekaB8Sperre(fn(RoboHubEurekaDiagnose $d): string =>
+            json_encode($d->freigeben($sekunden, $bestaetigung), JSON_THROW_ON_ERROR));
+    }
+
+    public function EurekaB8Widerrufen(): string
+    {
+        $this->eurekaB8KontoPruefen();
+        // Eigene kurze Freigabesemaphore: Widerruf wartet nicht auf den
+        // laufenden Diagnosepfad oder dessen Bündelsperre, solange noch kein I/O beginnt.
+        $this->eurekaB8Diagnose()->widerrufen();
+        return 'Eureka: Diagnosefreigabe widerrufen.';
+    }
+
+    public function EurekaB8Testen(string $freigabe): string
+    {
+        return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d) use ($freigabe): string {
+            $t = $this->treiberNeu();
+            if (!$t instanceof RoboHubEureka) { throw new RoboHubFehler('Eureka: Diagnosetreiber fehlt.'); }
+            $r = $t->diagnoseB8($d, $freigabe);
+            if ($r['httpStatus'] === 429) {
+                $this->WriteAttributeInteger('WarteBis', max($this->ReadAttributeInteger('WarteBis'), time() + 60));
+            }
+            return json_encode($r, JSON_THROW_ON_ERROR);
+        });
+    }
+
+    private function eurekaB8KontoPruefen(): void
+    {
+        if ($this->InstanceID !== 45174 || $this->ReadPropertyString('Hersteller') !== 'eureka' ||
+            $this->ReadPropertyString('Region') !== 'eu' || IPS_GetKernelRunlevel() !== KR_READY) {
+            throw new RoboHubFehler('Eureka: Administrativer Diagnoseeinstieg gesperrt.');
+        }
+    }
+
+    /** Diagnose → Bündel. Kein Refresh darin; Rotation/Abmeldung warten bis zum Ende.
+     * Der begrenzte HTTPS-Versuch hält die Sitzung absichtlich bis max. 15 s stabil.
+     */
+    private function mitEurekaB8Sperre(callable $aktion): string
+    {
+        $this->eurekaB8KontoPruefen();
+        $sem = 'RoboHubEureka_Diagnose_' . $this->InstanceID;
+        if (!IPS_SemaphoreEnter($sem, 1)) {
+            throw new RoboHubFehler('Eureka: Diagnose belegt; kein weiterer Aufruf.');
+        }
+        try {
+            return $this->mitBuendelSperre(function () use ($aktion): string {
+                $this->eurekaB8KontoPruefen();
+                $d = $this->eurekaB8Diagnose();
+                try { return $aktion($d); }
+                catch (RoboHubFehler $e) {
+                    if ($e->warteSekunden > 0) {
+                        $this->WriteAttributeInteger('WarteBis', max($this->ReadAttributeInteger('WarteBis'), time() + $e->warteSekunden));
+                    }
+                    throw $e;
+                } catch (Throwable $e) {
+                    throw new RoboHubFehler('Eureka: Diagnose abgebrochen; keine automatische Wiederholung.');
+                }
+            });
+        } finally {
+            IPS_SemaphoreLeave($sem);
+        }
+    }
+
+    private function eurekaB8Diagnose(): RoboHubEurekaDiagnose
+    {
+        return new RoboHubEurekaDiagnose(
+            fn(): array => $this->eurekaB8Kontext(),
+            function (): array {
+                $f = json_decode($this->ReadAttributeString('EurekaB8Diagnose'), true);
+                if (!is_array($f)) { throw new RoboHubFehler('Eureka: Persistenter Diagnosezustand ungültig.'); }
+                return $f;
+            },
+            fn(array $f) => $this->WriteAttributeString('EurekaB8Diagnose', json_encode($f, JSON_THROW_ON_ERROR)),
+            function (callable $aktion) {
+                $sem = 'RoboHubEureka_Freigabe_' . $this->InstanceID;
+                if (!IPS_SemaphoreEnter($sem, 1000)) {
+                    throw new RoboHubFehler('Eureka: Freigabe belegt; kein ungesicherter Zugriff.');
+                }
+                try { return $aktion(); }
+                finally { IPS_SemaphoreLeave($sem); }
+            },
+            function (): array {
+                // Flüchtig und getrennt vom zurückrollbaren Diagnoseattribut.
+                // Keine Initialisierung: Bereitstellung ist ein separater administrativer Auftrag.
+                $roh = $this->GetBuffer('EurekaB8Laufzeitfreigabe');
+                if ($roh === '') { return []; }
+                $l = json_decode($roh, true);
+                if (!is_array($l)) { throw new RoboHubFehler('Eureka: Laufzeitfreigabe ungültig.'); }
+                return $l;
+            },
+            fn(array $l) => $this->SetBuffer('EurekaB8Laufzeitfreigabe', json_encode($l, JSON_THROW_ON_ERROR))
+        );
+    }
+
+    /** Nur bereits vorhandene Tokens lesen; niemals gueltigesBuendel()/Refresh aufrufen. */
+    private function eurekaB8Buendel(): array
+    {
+        $this->eurekaB8KontoPruefen();
+        if ($this->ReadAttributeInteger('WarteBis') > time()) {
+            throw new RoboHubFehler('Eureka: Cloud-Sperre aktiv.');
+        }
+        $b = json_decode($this->ReadAttributeString('Buendel'), true);
+        if (!is_array($b)) { throw new RoboHubFehler('Eureka: Lokale Sitzung fehlt.'); }
+        // Tokenprüfung vor optionalem Listen-GET, auch bei altem Gerätecache.
+        RoboHubEurekaDiagnose::buendelPruefen($b, time());
+        if ($this->ReadAttributeString('BuendelRevision') === '') {
+            throw new RoboHubFehler('Eureka: Lokale Sitzung nicht gültig; keine automatische Erneuerung.');
+        }
+        return $b;
+    }
+
+    private function eurekaB8Kontext(): array
+    {
+        $b = $this->eurekaB8Buendel();
+        if (!IPS_InstanceExists(22708)) { throw new RoboHubFehler('Eureka: Diagnosegerät fehlt.'); }
+        $instanz = IPS_GetInstance(22708);
+        if (($instanz['ModuleInfo']['ModuleID'] ?? null) !== '{631DA85B-5985-4C25-B222-E47FDD49E302}' ||
+            ($instanz['ConnectionID'] ?? null) !== $this->InstanceID) {
+            throw new RoboHubFehler('Eureka: Diagnosegerät ist nicht eindeutig diesem Konto zugeordnet.');
+        }
+        $id = IPS_GetProperty(22708, 'GeraetID');
+        $liste = json_decode($this->ReadAttributeString('Geraete'), true);
+        if (!is_array($liste) || !array_is_list($liste)) { throw new RoboHubFehler('Eureka: Gerätecache fehlt.'); }
+        $treffer = array_values(array_filter($liste, fn($g) => is_array($g) && ($g['id'] ?? null) === $id));
+        if (count($treffer) !== 1) { throw new RoboHubFehler('Eureka: Diagnoseziel nicht eindeutig im lokalen Konto.'); }
+        $g = $treffer[0];
+        $g['stand'] = (json_decode($this->ReadAttributeString('Schnappschuss'), true) ?: [])[$id]['p'] ?? [];
+        $start = IPS_GetKernelStartTime();
+        if (!is_int($start) || $start <= 0 || $start > time()) { throw new RoboHubFehler('Eureka: Laufzeitbindung fehlt.'); }
+        if ($this->GetBuffer('EurekaB8Laufzeit') === '') {
+            $this->SetBuffer('EurekaB8Laufzeit', bin2hex(random_bytes(32)));
+        }
+        return ['konto' => $this->InstanceID, 'instanz' => 22708, 'hersteller' => 'eureka',
+            'region' => 'eu', 'kontoname' => $this->ReadPropertyString('Konto'),
+            'jetzt' => time(), 'monoton' => intdiv(hrtime(true), 1000000),
+            'boot' => $start . ':' . $this->GetBuffer('EurekaB8Laufzeit'),
+            'revision' => $this->ReadAttributeString('BuendelRevision'), 'buendel' => $b,
+            'warteBis' => $this->ReadAttributeInteger('WarteBis'),
+            'cacheZeit' => $this->ReadAttributeInteger('GeraeteStand'), 'geraet' => $g];
     }
 
     private function bearbeite(array $anfrage)
@@ -1291,7 +1457,8 @@ class RoboHubKonto extends IPSModule
         return $treiber;
     }
 
-    /** Kurze Attributsperre; niemals Cloud- oder Echtzeit-Aufrufe darin ausführen.
+    /** Kurze Attributsperre; außer der expliziten B8-Diagnose keine Cloud-Aufrufe darin.
+     * Keine Echtzeit-Aufrufe darin ausführen.
      * Reihenfolge: Refresh-Sperre → Attributsperre, nie umgekehrt.
      */
     private function mitBuendelSperre(callable $aktion)

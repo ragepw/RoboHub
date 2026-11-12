@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/RoboHubModell.php';
 require_once __DIR__ . '/RoboHubEurekaBefehlsweg.php';
 require_once __DIR__ . '/RoboHubEurekaZustand.php';
+require_once __DIR__ . '/RoboHubEurekaDiagnose.php';
 
 /**
  * Eureka / MZ-Robo Cloud
@@ -45,6 +46,20 @@ class RoboHubEureka implements RoboHubTreiber
         if (str_starts_with($path, '/devices/commands')) {
             throw new RoboHubFehler('Eureka: Produktiver Befehls-Transport gesperrt.');
         }
+        return $this->httpAusfuehren($method, $path, $token, $body);
+    }
+
+    /** Gemeinsame HTTPS-Implementierung für GETs und die gesonderte Einmaldiagnose. */
+    protected function httpAusfuehren(string $method, string $path, string $token, ?array $body, ?callable $diagnosePruefung = null): array
+    {
+        // Auch die gemeinsame unterste Transportgrenze bleibt für Normalbefehle zu.
+        if (str_starts_with($path, '/devices/commands')) {
+            if ($method !== 'POST' || !preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
+                $body !== ['data' => RoboHubEurekaDiagnose::BEFEHL] || $token === '' || $diagnosePruefung === null) {
+                throw new RoboHubFehler('Eureka: Befehls-Transport ohne Diagnoseberechtigung gesperrt.');
+            }
+            $diagnosePruefung();
+        }
         $headers = [
             'Accept-Language: en',
             'nonce: ' . bin2hex(random_bytes(16)),
@@ -66,22 +81,49 @@ class RoboHubEureka implements RoboHubTreiber
             throw new RoboHubFehler('Eureka: cURL konnte nicht starten.');
         }
 
-        $options = [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CUSTOMREQUEST => $method,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_TIMEOUT => 15,
-        ];
-
-        if ($body !== null) {
-            $options[CURLOPT_POSTFIELDS] =
-                json_encode($body, JSON_THROW_ON_ERROR);
-        }
-
-        curl_setopt_array($ch, $options);
-
         try {
+            $options = [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CUSTOMREQUEST => $method,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_CONNECTTIMEOUT => 8,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_MAXREDIRS => 0,
+            ];
+
+            if ($body !== null) {
+                $options[CURLOPT_POSTFIELDS] =
+                    json_encode($body, JSON_THROW_ON_ERROR);
+            }
+
+            if ($diagnosePruefung !== null) {
+                // HTTP/2 REFUSED_STREAM kann selbst innerhalb eines curl_exec() erneut
+                // senden. HTTP/1.1 allein genügt ebenfalls nicht: keine alte Verbindung,
+                // kein Expect-417-Neuversuch, keine HTTP-/Proxy-Auth-Aushandlung.
+                $options[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
+                $options[CURLOPT_FRESH_CONNECT] = true;
+                $options[CURLOPT_FORBID_REUSE] = true;
+                $options[CURLOPT_HTTPAUTH] = CURLAUTH_NONE;
+                $options[CURLOPT_PROXYAUTH] = CURLAUTH_NONE;
+                $options[CURLOPT_PROXY] = '';
+                $options[CURLOPT_HTTPHEADER][] = 'Expect:';
+            }
+
+            // Bei false ist nur ein Teil der Optionen gesetzt. Niemals damit senden.
+            try {
+                $konfiguriert = curl_setopt_array($ch, $options);
+            } catch (Throwable $e) {
+                throw new RoboHubFehler('Eureka: cURL-Konfiguration fehlgeschlagen; kein Transport.');
+            }
+            if ($konfiguriert !== true) {
+                throw new RoboHubFehler('Eureka: cURL-Konfiguration fehlgeschlagen; kein Transport.');
+            }
+
+            if ($diagnosePruefung !== null) {
+                // Letzte lokale Prüfung nach der cURL-Vorbereitung und vor dem ersten I/O.
+                $diagnosePruefung(true);
+            }
             $response = curl_exec($ch);
             $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
@@ -90,11 +132,31 @@ class RoboHubEureka implements RoboHubTreiber
                     'Eureka: Cloud-Verbindung fehlgeschlagen.'
                 );
             }
+            if ($diagnosePruefung !== null && curl_getinfo($ch, CURLINFO_HTTP_VERSION) !== CURL_HTTP_VERSION_1_1) {
+                // Nachträglicher Laufzeitnachweis, keine Zustellgarantie und kein Retry.
+                throw new RoboHubFehler('Eureka: Diagnose-HTTP-Version unbestätigt; keine Wiederholung.');
+            }
         } finally {
             curl_close($ch);
         }
 
         return ['status' => $status, 'response' => $response];
+    }
+
+    /** Kein 401-Refresh, kein Retry, kein anderer Befehl/Endpunkt. Nur Konto-Adapter. */
+    final public function diagnoseB8(RoboHubEurekaDiagnose $diagnose, string $freigabe): array
+    {
+        return $diagnose->ausfuehren($freigabe,
+            function (string $path, string $token, array $body, callable $pruefen): array {
+                if (!preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
+                    $body !== ['data' => RoboHubEurekaDiagnose::BEFEHL] || $token === '') {
+                    throw new RoboHubFehler('Eureka: Diagnose-Transportparameter gesperrt.');
+                }
+                // Direkt vor Headern/cURL erneut lokal prüfen: Kontext, Sitzung,
+                // gültige Freigabe UND bereits persistierten Verbrauch.
+                $pruefen();
+                return $this->httpAusfuehren('POST', $path, $token, $body, $pruefen);
+            });
     }
 
     private function request(
