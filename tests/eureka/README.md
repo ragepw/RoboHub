@@ -441,3 +441,15 @@ Aktueller Lauf `bash tests/eureka/run-dock-offline.sh`: Exitcode 0;
 683 Zustands- und 72 Tokenprüfungen bestanden. Vollständiger RoboHub-Prüfstand,
 22 Struktur-Gegenproben, 83 PHP-Lints und `git diff --check` ebenfalls bestanden.
 Netzisolierung war aktiv; Signatur-/Schlüsselgeneratoren waren deaktiviert.
+
+## Beaufsichtigter Pause-Einmaltest (12.11.2026)
+
+`bash tests/eureka/run-pause-offline.sh` führt den vollständigen für diesen
+Auftrag zulässigen Prüfstand netzisoliert und mit deaktivierten
+Signatur-/Schlüsselgeneratoren aus. Genehmigungserzeugende und importierende
+Prüfstände sind ausdrücklich ausgelassen. `pause-test.php` prüft die native
+Kontointegration und den Einmalverbrauch; der gemeinsame HTTPS-Prüfstand ergänzt
+20 Pause-Gegenproben. `.tools/test-eureka-pause.inc.php` prüft die Bedienung über
+die bestehende Variable 22284 im echten Gerätemodul mit unverändert gesperrtem
+Produktivtreiber und Transportdouble. Implementierung, Prüfzahlen und verbleibende
+Voraussetzungen: [Pause-Einmaltest](../../docs/eureka-pause-einmaltest.md).

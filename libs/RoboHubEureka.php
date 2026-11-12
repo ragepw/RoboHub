@@ -6,6 +6,7 @@ require_once __DIR__ . '/RoboHubEurekaBefehlsweg.php';
 require_once __DIR__ . '/RoboHubEurekaZustand.php';
 require_once __DIR__ . '/RoboHubEurekaDiagnose.php';
 require_once __DIR__ . '/RoboHubEurekaDock.php';
+require_once __DIR__ . '/RoboHubEurekaPauseTest.php';
 
 /**
  * Eureka / MZ-Robo Cloud
@@ -26,6 +27,7 @@ class RoboHubEureka implements RoboHubTreiber
     public $befehlsVersuch = null;
     public bool $manuelleBedienung = false;
     private ?array $steuerTransport = null;
+    public ?RoboHubEurekaPauseTest $pauseTest = null;
 
     protected function jetzt(): int
     {
@@ -49,7 +51,7 @@ class RoboHubEureka implements RoboHubTreiber
     ): array {
         // Zweite, vom befehl()-Einstieg unabhängige Sperre VOR Headern und cURL.
         if (str_starts_with($path, '/devices/commands')) {
-            if (!self::BEFEHLE_FREIGEGEBEN || $this->steuerTransport === null ||
+            if (!$this->steuerTransportErlaubt() || $this->steuerTransport === null ||
                 [$method, $path, $token, $body] !== $this->steuerTransport['auftrag']) {
                 throw new RoboHubFehler('Eureka: Produktiver Befehls-Transport gesperrt.');
             }
@@ -58,12 +60,24 @@ class RoboHubEureka implements RoboHubTreiber
         return $this->httpAusfuehren($method, $path, $token, $body);
     }
 
+    /** Nur der exakt vorbereitete Pauseplan darf die unveränderten Globalsperren umgehen. */
+    private function steuerTransportErlaubt(): bool
+    {
+        if (self::BEFEHLE_FREIGEGEBEN) { return true; }
+        if ($this->pauseTest === null || ($this->steuerTransport['pauseTest'] ?? false) !== true ||
+            !$this->manuelleBedienung) { return false; }
+        $a = $this->steuerTransport['auftrag'];
+        if ($a[0] !== 'POST' || $a[3] !== ['data' => RoboHubEurekaProtokoll::pause()]) { return false; }
+        $this->pauseTest->vorTransport();
+        return true;
+    }
+
     /** Gemeinsame HTTPS-Implementierung für GETs, Befehle und B8-/Dock-Einmalpfade. */
     protected function httpAusfuehren(string $method, string $path, string $token, ?array $body, ?callable $diagnosePruefung = null, bool $dock = false): array
     {
         // Auch die gemeinsame unterste Transportgrenze bleibt für Normalbefehle zu.
         if (str_starts_with($path, '/devices/commands')) {
-            $normal = self::BEFEHLE_FREIGEGEBEN && !$dock && $this->steuerTransport !== null &&
+            $normal = $this->steuerTransportErlaubt() && !$dock && $this->steuerTransport !== null &&
                 $diagnosePruefung === $this->steuerTransport['pruefen'] &&
                 [$method, $path, $token, $body] === $this->steuerTransport['auftrag'];
             if ($normal) {
@@ -473,10 +487,19 @@ class RoboHubEureka implements RoboHubTreiber
         string $befehl,
         array $parameter
     ): string {
-        if (!self::BEFEHLE_FREIGEGEBEN) {
+        $pause = $this->pauseTest;
+        $test = $pause !== null && $this->manuelleBedienung && $befehl === 'pause' && $parameter === [];
+        $zuordnungen = self::BEFEHLS_ZUORDNUNGEN;
+        if ($test) {
+            $k = $pause->pruefen();
+            if (($geraet['id'] ?? null) !== $k['geraet']['id'] || $buendel !== $k['buendel']) {
+                throw new RoboHubFehler('Eureka: Pause-Testziel oder Sitzung geändert.');
+            }
+            $zuordnungen = RoboHubEurekaPauseTest::zuordnungen($k);
+        } elseif (!self::BEFEHLE_FREIGEGEBEN) {
             throw new RoboHubFehler('Eureka: Steuerbefehle noch nicht freigegeben.');
         }
-        if (self::BEFEHLS_GERAET_ID === '' || ($geraet['id'] ?? null) !== self::BEFEHLS_GERAET_ID) {
+        if (!$test && (self::BEFEHLS_GERAET_ID === '' || ($geraet['id'] ?? null) !== self::BEFEHLS_GERAET_ID)) {
             throw new RoboHubFehler('Eureka: Separat bestätigte Befehlsgerätebindung fehlt.');
         }
         if (!is_callable($this->befehlsKontext) || !is_callable($this->befehlsVersuch)) {
@@ -485,22 +508,26 @@ class RoboHubEureka implements RoboHubTreiber
         // Das Konto liefert bereits ein erneuertes und persistiertes Bündel.
         // Eine neue Instanz entspricht genau einem Versuch, ohne POST-Wiederholung.
         $weg = new RoboHubEurekaBefehlsweg(
-            function (string $method, string $path, string $token, ?array $body, callable $pruefen): array {
+            function (string $method, string $path, string $token, ?array $body, callable $pruefen) use ($test): array {
                 if ($this->steuerTransport !== null) {
                     throw new RoboHubFehler('Eureka: Befehls-Transport bereits belegt.');
                 }
-                $this->steuerTransport = ['auftrag' => [$method, $path, $token, $body], 'pruefen' => $pruefen];
+                $this->steuerTransport = ['auftrag' => [$method, $path, $token, $body], 'pruefen' => $pruefen, 'pauseTest' => $test];
                 try {
                     return $this->transport($method, $path, $token, $body);
                 } finally {
                     $this->steuerTransport = null;
                 }
             },
-            self::BEFEHLS_ZUORDNUNGEN,
-            $this->beiUnauthorized,
+            $zuordnungen,
+            $test ? null : $this->beiUnauthorized,
             $this->befehlsKontext,
             $this->manuelleBedienung,
-            $this->befehlsVersuch
+            function (array $g, array $b, bool $verbrauchen) use ($test, $pause): void {
+                if ($test && $verbrauchen) { $pause->verbrauchen(); }
+                ($this->befehlsVersuch)($g, $b, $verbrauchen);
+            },
+            $test ? fn(bool $beginn) => $pause->vorTransport($beginn) : null
         );
         return $weg->befehl($buendel, $geraet, $befehl, $parameter, $this->jetzt());
     }

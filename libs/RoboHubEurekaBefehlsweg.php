@@ -17,10 +17,12 @@ final class RoboHubEurekaBefehlsweg
     private bool $verbraucht = false;
     private bool $manuell;
     private $versuch;
+    private $vorTransport;
 
     public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null, ?callable $kontextLesen = null,
-        bool $manuell = false, ?callable $versuch = null)
+        bool $manuell = false, ?callable $versuch = null, ?callable $vorTransport = null)
     {
+        $this->vorTransport = $vorTransport;
         $this->manuell = $manuell;
         $this->versuch = $versuch;
         $this->kontextLesen = $kontextLesen;
@@ -210,7 +212,7 @@ final class RoboHubEurekaBefehlsweg
             ($this->versuch)($geraet, $buendel, true);
         }
         // Derselbe lokale Kontext wird nach der HTTP-Vorbereitung nochmals geprüft.
-        $pruefen = function () use ($geraet, $buendel, $befehl, $parameter, $jetzt, $plan): void {
+        $pruefen = function (bool $transportBeginnt = false) use ($geraet, $buendel, $befehl, $parameter, $jetzt, $plan): void {
             $g = $geraet; $b = $buendel; $zeit = $jetzt;
             if (is_callable($this->kontextLesen)) {
                 $k = ($this->kontextLesen)($geraet['id'], $buendel);
@@ -221,6 +223,7 @@ final class RoboHubEurekaBefehlsweg
                 throw new RoboHubFehler('Eureka: Befehlsgrundlage geändert; kein Versand.');
             }
             if (is_callable($this->versuch)) { ($this->versuch)($g, $b, false); }
+            if (is_callable($this->vorTransport)) { ($this->vorTransport)($transportBeginnt); }
         };
         try {
             $pruefen();

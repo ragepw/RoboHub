@@ -124,6 +124,7 @@ class RoboHubKonto extends IPSModule
         $this->RegisterAttributeString('EurekaB8Diagnose', '{}');
         $this->RegisterAttributeString('EurekaDockVersuch', '{}');
         $this->RegisterAttributeString('EurekaBefehlsversuch', '{}');
+        $this->RegisterAttributeString('EurekaPauseTest', '{}');
         // Zweistufige Anmeldung (Ecovacs-Gerätebestätigung): Zwischenstand bis zum Code.
         $this->RegisterAttributeString('AnmeldeVorstufe', '');
         $this->RegisterAttributeString('Geraete', '[]');
@@ -497,6 +498,74 @@ class RoboHubKonto extends IPSModule
                 'anmeldungNoetig' => ($e instanceof RoboHubFehler) && $e->anmeldungNoetig,
             ]);
         }
+    }
+
+    /** Bewusste lokale Bedienfreigabe; erzeugt/importiert kein Genehmigungsdokument. Kein I/O. */
+    public function EurekaPauseTestFreigeben(string $cloudGeraetId, int $sekunden, string $bestaetigung): string
+    {
+        $this->eurekaPauseAdministratorPruefen();
+        $bis = $this->eurekaPauseTest()->freigeben($cloudGeraetId, $sekunden, $bestaetigung);
+        return json_encode(['gueltigBis' => $bis, 'befehl' => 'pause', 'transportversuche' => 1], JSON_THROW_ON_ERROR);
+    }
+
+    public function EurekaPauseTestWiderrufen(): string
+    {
+        $this->eurekaPauseAdministratorPruefen();
+        $this->eurekaPauseTest()->widerrufen();
+        return 'Eureka: Pause-Testfreigabe geschlossen; keine neue Freigabe möglich.';
+    }
+
+    private function eurekaPauseAdministratorPruefen(): string
+    {
+        if ($this->InstanceID !== 45174 || $this->ReadPropertyString('Hersteller') !== 'eureka' ||
+            $this->ReadPropertyString('Region') !== 'eu' || IPS_GetKernelRunlevel() !== KR_READY ||
+            !function_exists('IPS_IsAdministrator') || !function_exists('IPS_GetLoggedInUser') ||
+            IPS_IsAdministrator() !== true) {
+            throw new RoboHubFehler('Eureka: Pause-Test erfordert einen nativ angemeldeten Administrator.');
+        }
+        $benutzer = IPS_GetLoggedInUser();
+        if (!is_string($benutzer) || trim($benutzer) === '' || $benutzer !== trim($benutzer) || $benutzer === '@unknown') {
+            throw new RoboHubFehler('Eureka: Pause-Test benötigt einen eindeutig angemeldeten beaufsichtigenden Bediener.');
+        }
+        return $benutzer;
+    }
+
+    private function eurekaPauseTest(): RoboHubEurekaPauseTest
+    {
+        $lesen = function (bool $laufzeit): array {
+            $roh = $laufzeit ? $this->GetBuffer('EurekaPauseTest') : $this->ReadAttributeString('EurekaPauseTest');
+            if ($laufzeit && $roh === '') { return []; }
+            $f = json_decode($roh, true);
+            if (!is_array($f)) { throw new RoboHubFehler('Eureka: Pause-Testzustand unlesbar; kein Versand.'); }
+            return $f;
+        };
+        return new RoboHubEurekaPauseTest(
+            function (): array {
+                $benutzer = $this->eurekaPauseAdministratorPruefen();
+                $sitzung = $this->buendelStand();
+                $b = json_decode($sitzung[0], true);
+                if (!is_array($b)) { throw new RoboHubFehler('Eureka: Pause-Sitzung fehlt.'); }
+                $id = IPS_GetProperty(22708, 'GeraetID');
+                if (!is_string($id)) { throw new RoboHubFehler('Eureka: Pause-Gerätebindung fehlt.'); }
+                $k = $this->eurekaSteuerKontext($id, $b, $sitzung);
+                return $k + ['konto' => $this->InstanceID, 'instanz' => 22708, 'befehlsvariable' => 22284,
+                    'hersteller' => $this->ReadPropertyString('Hersteller'), 'region' => $this->ReadPropertyString('Region'),
+                    'monoton' => intdiv(hrtime(true), 1000000),
+                    'boot' => IPS_GetKernelStartTime() . ':' . $this->GetBuffer('EurekaSteuerLaufzeit'),
+                    'revision' => $sitzung[1], 'kontoname' => $this->ReadPropertyString('Konto'),
+                    'benutzer' => $benutzer, 'cacheZeit' => $this->ReadAttributeInteger('GeraeteStand'),
+                    'warteBis' => $this->ReadAttributeInteger('WarteBis')];
+            },
+            fn(): array => $lesen(false),
+            fn(array $f) => $this->WriteAttributeString('EurekaPauseTest', json_encode($f, JSON_THROW_ON_ERROR)),
+            fn(): array => $lesen(true),
+            fn(array $f) => $this->SetBuffer('EurekaPauseTest', json_encode($f, JSON_THROW_ON_ERROR)),
+            function (callable $aktion) {
+                $sem = 'RoboHubEureka_PauseTest_' . $this->InstanceID;
+                if (!IPS_SemaphoreEnter($sem, 1)) { throw new RoboHubFehler('Eureka: Pause-Freigabe belegt; kein Versand.'); }
+                try { return $aktion(); } finally { IPS_SemaphoreLeave($sem); }
+            }
+        );
     }
 
     /** Nur expliziter administrativer Skriptaufruf; kein ForwardData/RequestAction/UI/Timer. */
@@ -992,7 +1061,10 @@ class RoboHubKonto extends IPSModule
         $geraet = $this->findeGeraet((string)($anfrage['Geraet'] ?? ''));
         // Letzter vollständiger Rohstand (z. B. für die Mopp-Anhebungs-Erkennung bei Raum-Einstellungen).
         $geraet['stand'] = (array)((json_decode((string)$this->ReadAttributeString('Schnappschuss'), true) ?: [])[(string)$geraet['id']]['p'] ?? []);
-        $buendel = $this->gueltigesBuendel();
+        $pauseTest = $aktion === 'befehl' && $this->ReadPropertyString('Hersteller') === 'eureka' &&
+            ($this->ReadAttributeString('EurekaPauseTest') !== '{}' || $this->GetBuffer('EurekaPauseTest') !== '');
+        // Ein aktiver/verbrauchter Test erneuert niemals automatisch seine Sitzung.
+        $buendel = $pauseTest ? (json_decode($this->ReadAttributeString('Buendel'), true) ?: []) : $this->gueltigesBuendel();
         $sitzung = $this->buendelStand();
         if ((json_decode($sitzung[0], true) ?: []) !== $buendel) {
             throw new RoboHubFehler(RoboHubText::t('The session has changed. Please try again.'));
@@ -1693,6 +1765,8 @@ class RoboHubKonto extends IPSModule
     {
         $treiber = $this->treiberNeu();
         if ($treiber instanceof RoboHubEureka) {
+            $treiber->pauseTest = ($this->ReadAttributeString('EurekaPauseTest') !== '{}' ||
+                $this->GetBuffer('EurekaPauseTest') !== '') ? $this->eurekaPauseTest() : null;
             // Nur für den späteren Befehlsaufruf merken; keine neue Sperre im Lesepfad.
             $sitzung = [$this->ReadAttributeString('Buendel'), $this->ReadAttributeString('BuendelRevision')];
             $treiber->befehlsKontext = fn(string $id, array $buendel): array => $this->eurekaSteuerKontext($id, $buendel, $sitzung);

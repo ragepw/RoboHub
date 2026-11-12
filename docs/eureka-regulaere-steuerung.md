@@ -8,6 +8,13 @@ in [Produktivvorbereitung](eureka-produktivvorbereitung.md) und
 [Steuerungsbericht](eureka-steuerung.md). Die separaten B8-/Dock-Genehmigungen
 werden weder ersetzt noch erweitert.
 
+## Ergänzung: eng begrenzter Pause-Einmaltest
+
+Die lokale Vorbereitung eines beaufsichtigten Pause-Tests steht in
+[Pause-Einmaltest](eureka-pause-einmaltest.md). Sie nutzt den hier beschriebenen
+regulären Befehlsweg mit unveränderten globalen Produktivsperren und unverändertem
+B8-/Dock-Einmalpfad. Sie wurde weder bereitgestellt noch aktiviert.
+
 ## Bestätigter Befund und Transport
 
 Laut Nutzerbericht war der genehmigte Dock-Einmalversuch erfolgreich: Die Cloud

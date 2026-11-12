@@ -293,6 +293,76 @@ foreach ([['stop', 'start', ['fan' => 2, 'water' => 0, 'mode' => 8]],
         };
     }
 }
+require_once __DIR__ . '/pause-fixtures.php';
+foreach ([200, 401, 429, 500, 302, 307, 'timeout', 'json', 'cloud', 'frame', 'version',
+    'options-false', 'options-exception', 'revoke', 'expire', 'offline', 'session', 'state', 'double-check'] as $case) {
+    $tests['Begrenzter Pause-Test im unveränderten gemeinsamen HTTPS-Code: ' . $case] = function () use ($case): void {
+        unset($GLOBALS['beiOptionen'], $GLOBALS['vorCurl']);
+        $GLOBALS['httpCalls'] = []; $GLOBALS['execCalls'] = 0;
+        $GLOBALS['status'] = is_int($case) ? $case : 200;
+        $GLOBALS['response'] = match ($case) {
+            'timeout' => false, 'json' => '{', 'cloud' => '{"errorCode":"0080005"}',
+            'frame' => '{"errorCode":0,"data":"invalid"}', default => '{"errorCode":0}',
+        };
+        $GLOBALS['httpVersion'] = $case === 'version' ? CURL_HTTP_VERSION_2_0 : CURL_HTTP_VERSION_1_1;
+        $GLOBALS['optionErgebnis'] = $case !== 'options-false';
+        $GLOBALS['optionException'] = $case === 'options-exception';
+        $f = pauseFixture(); pauseFreigeben($f); $snapshot = $f->k['geraet'];
+        $t = new RoboHubEureka(); $t->pauseTest = $f->test; $t->manuelleBedienung = true;
+        $t->befehlsKontext = fn(): array => $f->k;
+        $verbrauch = 0; $refresh = 0;
+        $t->befehlsVersuch = function ($g, $b, bool $neu) use (&$verbrauch): void { if ($neu) { $verbrauch++; } };
+        $t->beiUnauthorized = function () use (&$refresh): array { $refresh++; throw new RuntimeException('Kein Refresh'); };
+        $GLOBALS['vorCurl'] = function () use ($f, $t, $case): void {
+            sicher($f->attr['zustand'] === 'geschlossen' && isset($f->attr['transportBegonnenAm']));
+            if ($case === 'double-check') {
+                gesperrt(fn() => $f->test->vorTransport(true));
+                gesperrt(fn() => $t->befehl($f->k['buendel'], $f->k['geraet'], 'pause', []));
+            }
+        };
+        $GLOBALS['beiOptionen'] = function () use ($f, $case): void {
+            switch ($case) {
+                case 'revoke': $f->test->widerrufen(); break;
+                case 'expire': $f->k['monoton'] += 60000; break;
+                case 'offline': $f->k['geraet']['roh']['connected'] = false; break;
+                case 'session': $f->k['revision'] = 'other'; break;
+                case 'state': $f->k['geraet']['stand']['roh']['state'] = 'pause'; break;
+            }
+        };
+        try {
+            if (in_array($case, [200, 'double-check'], true)) {
+                sicher(str_contains($t->befehl($f->k['buendel'], $f->k['geraet'], 'pause', []), 'nicht bestätigt'));
+            } else { gesperrt(fn() => $t->befehl($f->k['buendel'], $f->k['geraet'], 'pause', [])); }
+            gesperrt(fn() => $t->befehl($f->k['buendel'], $f->k['geraet'], 'pause', []));
+            gesperrt(fn() => pauseFreigeben($f));
+            sicher($verbrauch === 1 && $refresh === 0 && count($GLOBALS['httpCalls']) === 1);
+            sicher($GLOBALS['execCalls'] === (in_array($case, ['options-false', 'options-exception', 'revoke', 'expire', 'offline', 'session', 'state'], true) ? 0 : 1));
+            $call = $GLOBALS['httpCalls'][0]; $o = $call['options'];
+            sicher($call['url'] === 'https://euprod.mzrobo.com/devices/commands/offline-e20');
+            sicher($o[CURLOPT_CUSTOMREQUEST] === 'POST' && $o[CURLOPT_POSTFIELDS] === '{"data":"AA0DB800000000000002221B00FC"}');
+            sicher($o[CURLOPT_CONNECTTIMEOUT] === 8 && $o[CURLOPT_TIMEOUT] === 15);
+            sicher($o[CURLOPT_FOLLOWLOCATION] === false && $o[CURLOPT_MAXREDIRS] === 0);
+            sicher($o[CURLOPT_HTTP_VERSION] === CURL_HTTP_VERSION_1_1 && $o[CURLOPT_FRESH_CONNECT] === true && $o[CURLOPT_FORBID_REUSE] === true);
+            sicher($o[CURLOPT_HTTPAUTH] === CURLAUTH_NONE && $o[CURLOPT_PROXYAUTH] === CURLAUTH_NONE && $o[CURLOPT_PROXY] === '' && in_array('Expect:', $o[CURLOPT_HTTPHEADER], true));
+            if (!in_array($case, ['offline', 'state'], true)) { sicher($f->k['geraet'] === $snapshot); }
+        } finally {
+            unset($GLOBALS['beiOptionen'], $GLOBALS['vorCurl'], $GLOBALS['httpVersion'], $GLOBALS['optionErgebnis'], $GLOBALS['optionException']);
+        }
+    };
+}
+$tests['Pause-Freigabe öffnet keinen direkten Transport und keine anderen Pläne'] = function (): void {
+    $GLOBALS['httpCalls'] = []; $GLOBALS['execCalls'] = 0;
+    $f = pauseFixture(); pauseFreigeben($f);
+    $t = new RoboHubEureka(); $t->pauseTest = $f->test; $t->manuelleBedienung = true;
+    $http = new ReflectionMethod(RoboHubEureka::class, 'httpAusfuehren');
+    $transport = new ReflectionMethod(RoboHubEureka::class, 'transport');
+    foreach ([RoboHubEurekaProtokoll::pause(), RoboHubEurekaProtokoll::fortsetzen(), RoboHubEurekaProtokoll::station()] as $hex) {
+        gesperrt(fn() => $http->invoke($t, 'POST', '/devices/commands/offline-e20', 'offline', ['data' => $hex], fn() => null));
+        gesperrt(fn() => $transport->invoke($t, 'POST', '/devices/commands/offline-e20', 'offline', ['data' => $hex]));
+    }
+    sicher($GLOBALS['httpCalls'] === [] && $GLOBALS['execCalls'] === 0);
+};
+
 $fehler = 0;
 foreach ($tests as $name => $fn) {
     try { $fn(); echo 'OK: ' . $name . "\n"; }
