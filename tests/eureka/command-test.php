@@ -175,6 +175,25 @@ $tests['Pause wird fortgesetzt, ohne neue Saug- oder Wasserwerte'] = static func
     commandAssert($p['aktion'] === 'resume' && $p['body']['data'] === 'AA0DB800000000000002221C00FB');
     commandError(fn() => commandPlan($d));
 };
+// Die real beobachtete Schlafkombination ist für die Anzeige konsistent,
+// belegt aber keinen neuen Auftrag statt Resume (Hersteller: sleepType).
+foreach (['start', 'pause', 'resume', 'station'] as $aktion) {
+    $tests['Konsistentes ERP_model/sleep autorisiert keinen Versand: ' . $aktion] = static function () use ($aktion): void {
+        $d = commandDevice('ERP_model');
+        $d['stand']['roh'] += ['parentState' => 'sleep', 'cleanMissionState' => 'no_cleaning_mission'];
+        $d['stand']['roh']['batteryLevel'] = 100;
+        $bewertung = RoboHubEurekaZustand::shadow($d['stand']['roh']);
+        commandAssert($bewertung['konsistent'] && $bewertung['zustand'] === RoboHubModell::ZUSTAND_SCHLAF);
+        $versand = 0;
+        $weg = new RoboHubEurekaBefehlsweg(static function () use (&$versand): array {
+            ++$versand;
+            return commandResponse();
+        }, commandMappings(), null, null, true);
+        commandError(fn() => $weg->ausfuehren(commandBundle(), $d, $aktion,
+            $aktion === 'start' ? ['fan' => 1, 'water' => 0, 'mode' => 8] : [], COMMAND_NOW));
+        commandAssert($versand === 0);
+    };
+}
 foreach (['stop', 'charging', 'charging_finish'] as $state) {
     $tests['Neustart aus ' . $state] = static fn() => commandAssert(commandPlan(commandDevice($state))['aktion'] === 'start');
 }
