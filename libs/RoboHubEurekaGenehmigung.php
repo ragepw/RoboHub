@@ -38,19 +38,20 @@ final class RoboHubEurekaGenehmigung
     /** Fester externer Vertrauensanker; kein Property, Request-Parameter oder Umgebungswert. */
     public static function vertrauensanker(): string
     {
-        if (!function_exists('posix_geteuid')) {
-            throw new RoboHubFehler('Eureka: POSIX-EUID-Prüfung erforderlich.');
-        }
-        // Nur dieser feste B8-Vertrauensanker erlaubt die privilegierte Laufzeit.
-        // Root kann auch geschützte Pfade schreiben; Eigentümer/Modus/Typ gelten weiter.
-        $root = posix_geteuid() === 0;
+        // Ohne POSIX bleibt die Prozessidentität unbewiesen, niemals als Root ableiten.
+        $euid = function_exists('posix_geteuid') ? posix_geteuid() : null;
+        // Ausschließlich dieser feste B8-Import (am Moduleinstieg nativ administrativ
+        // geprüft) toleriert Root oder unbekannte EUID beim Schreibzugriffs-Veto.
+        // lstat prüft Eigentümer/Modus/Typ nativ ohne POSIX. Root kann auch diese
+        // geschützten Pfade, Modulcode und Laufzeitdaten manipulieren.
+        $schreibzugriffPruefen = $euid !== null && $euid !== 0;
         $pfad = '/etc/robohub/eureka-b8.pub';
         foreach (['/etc', '/etc/robohub', $pfad] as $p) {
             clearstatcache(true, $p);
             $s = @lstat($p);
             if ($s === false || $s['uid'] !== 0 || ($s['mode'] & 0022) !== 0 ||
                 ($s['mode'] & 0170000) !== ($p === $pfad ? 0100000 : 0040000) ||
-                is_link($p) || (!$root && is_writable($p))) {
+                is_link($p) || ($schreibzugriffPruefen && is_writable($p))) {
                 throw new RoboHubFehler('Eureka: Administrativer Vertrauensanker fehlt oder ist ungeschützt.');
             }
         }

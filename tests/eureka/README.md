@@ -1,5 +1,28 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## B8-Import ohne POSIX (12.11.2026, Basis 178c56b)
+
+[Änderung und Sicherheitsgrenzen](../../docs/eureka-b8-bereitstellung.md#aktualisierung-ip-symcon-91-ohne-posix-12112026).
+Der feste B8-Import behandelt eine fehlende POSIX-EUID als unbekannt.
+Eigentümer, Modus, Dateityp und Symlinks werden weiter nativ geprüft.
+Root kann Schlüsseldatei, Modulcode und Laufzeitdaten manipulieren; ohne POSIX
+wird auch fehlender effektiver Schreibzugriff (z. B. ACLs) nicht nachgewiesen.
+Normale Befehle bleiben gesperrt; keine automatische Freigabe.
+
+`root-import-test.php` enthält 39 Fälle: jeweils 19 mit nativer EUID 0 und
+mit tatsächlich ungeladenem POSIX (`php -n -d extension=ctype`), dazu ein
+Testdouble für EUID 1000 mit nativem Schreibzugriffs-Veto. Kein Testschalter
+im Produktivcode. Zusätzliche Gegenproben prüfen falsches Konto, falsche
+Laufzeit und einen defekten Schlüssel. Neustart und doppelter Import werden
+in beiden Laufzeitvarianten geprüft. Nur isoliertes tmpfs-`/etc`, alle
+Transporte sind Doubles. Ausführung: `bash tests/eureka/run-offline.sh`.
+
+Abschlusslauf: Exitcode 0; alle bisherigen Offline-Prüfstände einschließlich
+39 B8-Importfällen bestanden, 80 PHP-Dateien ohne Syntaxfehler und
+`git diff --check` fehlerfrei. Keine native Symcon-Prüfung durchgeführt.
+
+Die folgenden Prüfzahlen und Root-Aussagen dokumentieren den vorherigen Stand.
+
 ## Root-Kompatibilität des B8-Imports (12.11.2026, Basis aeb7656)
 
 [Änderung, Sicherheitsbewertung und Testgrenzen](../../docs/eureka-b8-bereitstellung.md#aktualisierung-kontrollierter-import-unter-euid-0-12112026).

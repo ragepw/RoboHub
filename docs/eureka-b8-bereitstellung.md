@@ -8,6 +8,64 @@ Commits oder Pushs. Synthetische Testgenehmigungen und Schlüssel existieren nur
 im RAM bzw. in anonymen Prozesspipes. Alle vorgefundenen uncommitteten
 Änderungen bleiben erhalten.
 
+## Aktualisierung: IP-Symcon 9.1 ohne POSIX (12.11.2026)
+
+Basis dieser lokalen Korrektur ist HEAD `178c56b` auf
+`feature/eureka-e20-evo-plus`. Der gemeldete Symcon-Prozess läuft als Root,
+lädt aber kein POSIX und bietet kein `posix_geteuid()`. Die bisherige zwingende
+POSIX-Abfrage verhindert deshalb bereits das Lesen des Vertrauensankers.
+
+Nur `RoboHubEurekaGenehmigung::vertrauensanker()` wird angepasst: Ohne die
+native Funktion wird die EUID als `null` (nicht nachgewiesen) behandelt.
+Es gibt keine Ermittlung über `getmyuid()`, Dateieigentümer, Benutzernamen,
+Shell, `/proc` oder die Administratorrolle. `IPS_IsAdministrator()` bestätigt
+die Symcon-Berechtigung, keine Betriebssystemidentität. Der ausschließlich
+feste B8-Import toleriert diese unbekannte Prozessidentität ebenso wie bisher
+nachgewiesene EUID 0 beim zusätzlichen `is_writable()`-Veto. Bei nachgewiesener
+EUID ungleich 0 bleibt dieses Veto zwingend erhalten.
+
+Die Eigentümer-/Modus-/Typprüfung braucht keine POSIX-Erweiterung: PHPs
+natives `lstat()` liefert UID, Modusbits und Dateityp auch ohne diese Erweiterung.
+`clearstatcache()`, `is_link()`, Größen-/Lesbarkeitsprüfung und Dateilesen bleiben
+aktiv. `/etc`, `/etc/robohub` und die feste Datei `/etc/robohub/eureka-b8.pub`
+müssen weiterhin root-eigene echte Verzeichnisse bzw. eine reguläre Datei sein,
+ohne Gruppen-/Weltschreibrechte und ohne Symlinks. Fehlende oder fehlerhafte
+Dateisystemprüfungen sperren; es gibt keinen Ersatzschlüssel oder variablen Pfad.
+Native Administrator-/Benutzerprüfung vor und innerhalb der Sperre, gültige
+Ed25519-Signatur, Konto-/Geräte-/Laufzeitbindung und Einmalverbrauch bleiben
+unverändert zwingend. Normale Eureka-Befehle bleiben gesperrt.
+
+**Root-Risiko und Grenze der Ausnahme:** Root kann Vertrauensanker, Modulcode
+und Laufzeitdaten verändern; die externe Signatur schützt nicht vor
+kompromittiertem Root. Ohne POSIX ist weder Root noch ein unprivilegierter
+Prozess nachgewiesen. Die Ausnahme beweist auch keinen fehlenden effektiven
+Schreibzugriff, etwa durch zusätzliche ACL-Rechte eines unprivilegierten
+Prozesses. UID und klassische Modusbits werden trotzdem vollständig geprüft.
+Es erfolgt keine pauschale Sicherheitsabschaltung und keine Freischaltung.
+Der private Signaturschlüssel bleibt außerhalb von Symcon.
+
+Der erweiterte Offline-Prüfstand nutzt weiter getrennte User-/Mount-/
+Netznamespaces und tmpfs-`/etc`. Er führt dieselben Dateisystem- und Importfälle
+mit nativer POSIX-EUID 0 und mit `php -n -d extension=ctype` aus; letzteres
+prüft ausdrücklich, dass sowohl Erweiterung als auch EUID-Funktion fehlen.
+CTYPE wird nur für den unveränderten Protokollparser geladen. Ein weiterer
+Fall ersetzt ausschließlich die deaktivierte EUID-Funktion durch ein Testdouble
+mit EUID 1000 und bestätigt das native Schreibzugriffs-Veto. Das ist kein
+Nachweis eines echten unprivilegierten Symcon-Prozesses. Administrator und
+Transport sind weiterhin Offline-Doubles. Alle Schreibzugriffe betreffen nur
+das wegwerfbare tmpfs; keine Host-Schlüsseldatei, kein Zugriff auf Produktion.
+Native IP-Symcon-Authentifizierung und Persistenz bleiben ungeprüft.
+
+Abschlussprüfung: `bash tests/eureka/run-offline.sh`, Exitcode 0, vollständig
+netzisoliert. Alle bisherigen Offline-Prüfstände und die 39 B8-Importfälle
+bestanden; 80 PHP-Dateien syntaxfehlerfrei, `git diff --check` fehlerfrei.
+Nach Ergänzung der expliziten POSIX-Prüfstandsvoraussetzung wurden die 39 Fälle
+nochmals vollständig erfolgreich ausgeführt. Keine Cloud-/Produktivzugriffe,
+Freischaltungen, Commits, Pushs oder Deployments. Nächster Schritt ist die
+lokale Prüfung des Diffs; eine native Symcon-Validierung bleibt separat offen.
+
+Die nachfolgende Aktualisierung dokumentiert den vorherigen Root-Arbeitsstand.
+
 ## Aktualisierung: kontrollierter Import unter EUID 0 (12.11.2026)
 
 Basis `aeb7656`, Branch `feature/eureka-e20-evo-plus`. Nur lokale Änderungen;
@@ -89,14 +147,15 @@ Der feste externe Vertrauensanker ist keine Moduleinstellung und kann nicht
 als Aufrufparameter gewählt werden. Datei und Elternverzeichnisse müssen
 root gehören, dürfen keine Symlinks und nicht gruppen-/weltbeschreibbar sein.
 Der Import erlaubt jetzt auch EUID 0, ausschließlich an dieser festen
-B8-Vertrauensankergrenze, und sperrt weiterhin bei fehlender POSIX-EUID-Prüfung.
+B8-Vertrauensankergrenze; ohne POSIX bleibt die EUID unbekannt
+(siehe Aktualisierung oben).
 Die `lstat`-Dateitypprüfung verlangt reguläre Datei bzw. echte Verzeichnisse;
 root als Eigentümer und das Verbot von Gruppen-/Weltschreibrechten bleiben
 unverändert. Modus 0644 für die Datei und 0755 für das Verzeichnis sind zulässig.
-Bei EUID ungleich 0 bleibt zusätzlich der effektive Schreibzugriff über
+Bei nachgewiesener EUID ungleich 0 bleibt zusätzlich der effektive Schreibzugriff über
 `is_writable()` ein Veto (auch bei beispielsweise per ACL gewährten Rechten).
-Bei EUID 0 entfällt nur dieses Veto: Root kann grundsätzlich auch korrekt
-root-eigene Dateien mit Modus 0644 schreiben. Die unten beschriebene
+Bei EUID 0 oder unbekannter EUID entfällt nur dieses Veto: Root kann
+grundsätzlich auch korrekt root-eigene Dateien mit Modus 0644 schreiben. Die unten beschriebene
 privilegierte Manipulierbarkeit wird für den kontrollierten Diagnoseversuch
 bewusst akzeptiert.
 Es gibt keinen mitgelieferten Schlüssel, keinen Schlüsselerzeuger im Modul,
