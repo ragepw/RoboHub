@@ -38,14 +38,19 @@ final class RoboHubEurekaGenehmigung
     /** Fester externer Vertrauensanker; kein Property, Request-Parameter oder Umgebungswert. */
     public static function vertrauensanker(): string
     {
-        if (!function_exists('posix_geteuid') || posix_geteuid() === 0) {
-            throw new RoboHubFehler('Eureka: Getrennte unprivilegierte Symcon-Laufzeit erforderlich.');
+        if (!function_exists('posix_geteuid')) {
+            throw new RoboHubFehler('Eureka: POSIX-EUID-Prüfung erforderlich.');
         }
+        // Nur dieser feste B8-Vertrauensanker erlaubt die privilegierte Laufzeit.
+        // Root kann auch geschützte Pfade schreiben; Eigentümer/Modus/Typ gelten weiter.
+        $root = posix_geteuid() === 0;
         $pfad = '/etc/robohub/eureka-b8.pub';
         foreach (['/etc', '/etc/robohub', $pfad] as $p) {
             clearstatcache(true, $p);
             $s = @lstat($p);
-            if ($s === false || $s['uid'] !== 0 || ($s['mode'] & 0022) !== 0 || is_link($p) || is_writable($p)) {
+            if ($s === false || $s['uid'] !== 0 || ($s['mode'] & 0022) !== 0 ||
+                ($s['mode'] & 0170000) !== ($p === $pfad ? 0100000 : 0040000) ||
+                is_link($p) || (!$root && is_writable($p))) {
                 throw new RoboHubFehler('Eureka: Administrativer Vertrauensanker fehlt oder ist ungeschützt.');
             }
         }

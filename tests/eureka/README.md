@@ -1,5 +1,22 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## Root-Kompatibilität des B8-Imports (12.11.2026, Basis aeb7656)
+
+[Änderung, Sicherheitsbewertung und Testgrenzen](../../docs/eureka-b8-bereitstellung.md#aktualisierung-kontrollierter-import-unter-euid-0-12112026).
+Der feste B8-Import akzeptiert EUID 0 bei weiterhin geschütztem Vertrauensanker.
+Root kann Vertrauensanker, Modulcode und Laufzeitdaten manipulieren; diese
+Grenze wird für den kontrollierten Diagnoseversuch bewusst akzeptiert.
+Der private Signaturschlüssel bleibt auf codex-dev. Keine automatische Freigabe.
+
+`root-import-test.php` läuft im Offline-Runner in getrennten User-/Mount-/
+Netznamespaces mit echter EUID 0 und flüchtigem tmpfs-`/etc`; kein Host-root
+und keine Schlüsseldatei im Host-`/etc`. Native POSIX-/Dateisystemprüfungen und
+der Importkörper bleiben unverändert geladen; Symcon und Transport sind Doubles.
+16 zusätzliche Fälle umfassen Dateisicherheit und den gesamten Importablauf.
+Vollständiger Runner: **2.453 Prüfungen und 22 Struktur-Gegenproben bestanden**,
+**0 Fehler**, **79 PHP-Dateien** syntaxfehlerfrei; native lokale HTTPS-
+Gegenversuche eingeschlossen. Native Symcon-Prüfung bleibt offen.
+
 ## Symcon-Modulstruktur (12.11.2026)
 
 Das externe Signierwerkzeug liegt unter `.tools/eureka-b8-signieren.php`.

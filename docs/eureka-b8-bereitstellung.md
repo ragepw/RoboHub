@@ -1,12 +1,70 @@
 # Administrative B8-Bereitstellung – lokaler Abschlussbericht
 
-12.11.2026 · Branch `feature/eureka-e20-evo-plus` · Ausgangscommit `a5980e0`.
+12.11.2026 · Branch `feature/eureka-e20-evo-plus` · Ausgangscommit der Root-Anpassung `aeb7656`.
 Dieser Stand wurde ausschließlich lokal implementiert und offline getestet.
 Keine konkrete Laufzeit, kein Schlüssel und kein Diagnoseversuch wurden auf
 IP-Symcon bereitgestellt. Keine Cloud-Aufrufe, Roboterbefehle, Deployments,
 Commits oder Pushs. Synthetische Testgenehmigungen und Schlüssel existieren nur
 im RAM bzw. in anonymen Prozesspipes. Alle vorgefundenen uncommitteten
 Änderungen bleiben erhalten.
+
+## Aktualisierung: kontrollierter Import unter EUID 0 (12.11.2026)
+
+Basis `aeb7656`, Branch `feature/eureka-e20-evo-plus`. Nur lokale Änderungen;
+kein Zugriff auf die produktive Installation, keine Cloud-Anfragen,
+Roboterbefehle, Commits, Pushs oder Deployments. Die gemeldete Produktion läuft
+mit IP-Symcon 9.1 als EUID 0; `/etc/robohub/eureka-b8.pub` ist laut Auftrag ein
+validierter Ed25519-Public-Key, root:root/0644, sein Verzeichnis root:root/0755.
+Diese Angaben wurden nicht durch Zugriff auf den Produktionshost überprüft.
+
+Die einzige Änderung am Produktivcode liegt in
+`libs/RoboHubEurekaGenehmigung.php::vertrauensanker()`: Die pauschale Root-Sperre
+entfällt; `is_writable()` bleibt für unprivilegierte Laufzeiten verpflichtend.
+Pfad und Signaturcode bleiben unverändert, der Dateityp wird zusätzlich direkt
+am `lstat`-Ergebnis geprüft. Keine wählbare Schlüsseldatei, kein neuer
+Moduleinstieg und kein automatisches Genehmigen. Native Administratorprüfung,
+Konto-/Instanz-/Cloud-Geräte-/Befehls-/Laufzeitbindung, Einmalverbrauch,
+Widerruf und sämtliche HTTP-Retry-Sperren bleiben unverändert. Normale
+Eureka-Steuerbefehle bleiben gesperrt. Andere Hersteller und Module werden
+nicht verändert.
+
+**Bewusst akzeptierte Sicherheitsgrenze:** Root kann grundsätzlich
+Vertrauensanker, Modulcode und Laufzeitdaten manipulieren. Der öffentliche
+Schlüssel schützt nicht vor kompromittiertem Root. Diese Einschränkung wird
+für den kontrollierten Diagnoseversuch bewusst akzeptiert. Der private
+Signaturschlüssel bleibt ausschließlich auf codex-dev.
+
+Der neue Prüfstand `tests/eureka/root-import-test.php` startet getrennte
+Bubblewrap-User-/Netz-/Mountnamespaces mit echter EUID 0 und flüchtigem
+`/etc` (tmpfs). Vor Schreibzugriffen prüft er die UID-Abbildung auf einen
+unprivilegierten Hostbenutzer, den Netznamespace und den tmpfs-Mount.
+Nur synthetische Public-Keys werden dort geschrieben; Testprivatschlüssel
+und signierte Dokumente bleiben im RAM. Der Host erhält keine Schlüsseldatei.
+Ein read-only eingebundenes Host-`/etc/passwd` stellt einen echten, im
+Usernamespace fremden Eigentümer dar. Kein Produktivcode wird ersetzt.
+Symcon-Benutzer, Buffer und Transport bleiben die bestehenden Offline-Doubles;
+dies beweist keine native Symcon-Authentifizierung oder Persistenz.
+
+16 Root-Fälle prüfen gültigen Vertrauensanker, falschen Eigentümer,
+Gruppen-/Weltschreibrechte, Datei-/Verzeichnissymlink, unsichere
+Verzeichnisse einschließlich `/etc`, falschen Dateityp, fehlende Datei,
+ungültige Signatur, Nichtadministrator, falsches Cloud-Gerät, Neustart,
+Attributrollback und Widerruf. Positivfälle prüfen den zweiten Import schon
+vor Ticketausstellung, wiederholten Transport und gesperrte normale
+Start-/Pause-/Stationsbefehle trotz erfolgreichem Import.
+
+`bash tests/eureka/run-offline.sh`: Exitcode 0, vollständig netzisoliert.
+192 Diagnose-, 19 Import-Kontext-, 16 Root-Import-, 18 HTTPS-Double-,
+21 native HTTPS-, 233 Befehls-, 683 Zustands-, 72 Token-/GET- und
+1.199 RoboHub-Prüfungen: **2.453 bestanden, 0 Fehler**, zusätzlich
+**22 Struktur-Gegenproben**. **79 PHP-Dateien** ohne Syntaxfehler;
+`git diff --check` fehlerfrei. Die normalen Befehlswege wurden anschließend
+zusätzlich innerhalb der erfolgreichen Root-Importfälle geprüft; auch diese
+16 Fälle bestehen vollständig. Bash- und Python-Syntax separat geprüft.
+Die Zahlen in Abschnitt G dokumentieren den früheren Bereitstellungsstand.
+
+Die folgenden Abschnitte beschreiben die bestehende Bereitstellungsarchitektur;
+die Aussagen zur root-Laufzeit sind an diese Aktualisierung angepasst.
 
 ## A. Gewählte Bereitstellungsarchitektur
 
@@ -30,8 +88,17 @@ Sperre neben dem Diagnoseattribut. Neu ist ein **signierter externer Import**:
 Der feste externe Vertrauensanker ist keine Moduleinstellung und kann nicht
 als Aufrufparameter gewählt werden. Datei und Elternverzeichnisse müssen
 root gehören, dürfen keine Symlinks und nicht gruppen-/weltbeschreibbar sein.
-Der Import verweigert root-Prozesse und sperrt bei fehlender POSIX-EUID-Prüfung;
-zusätzlich prüft er den effektiven Schreibzugriff auf diese Pfade.
+Der Import erlaubt jetzt auch EUID 0, ausschließlich an dieser festen
+B8-Vertrauensankergrenze, und sperrt weiterhin bei fehlender POSIX-EUID-Prüfung.
+Die `lstat`-Dateitypprüfung verlangt reguläre Datei bzw. echte Verzeichnisse;
+root als Eigentümer und das Verbot von Gruppen-/Weltschreibrechten bleiben
+unverändert. Modus 0644 für die Datei und 0755 für das Verzeichnis sind zulässig.
+Bei EUID ungleich 0 bleibt zusätzlich der effektive Schreibzugriff über
+`is_writable()` ein Veto (auch bei beispielsweise per ACL gewährten Rechten).
+Bei EUID 0 entfällt nur dieses Veto: Root kann grundsätzlich auch korrekt
+root-eigene Dateien mit Modus 0644 schreiben. Die unten beschriebene
+privilegierte Manipulierbarkeit wird für den kontrollierten Diagnoseversuch
+bewusst akzeptiert.
 Es gibt keinen mitgelieferten Schlüssel, keinen Schlüsselerzeuger im Modul,
 keinen Reset und keinen automatischen Import. Fehlende Sodium-Unterstützung,
 fehlender/defekter Vertrauensanker oder ungültige Dokumente sperren.
@@ -119,11 +186,12 @@ folgende Voraussetzungen separat zu prüfen und zu genehmigen:
   bleibt ein Freischaltungsblocker; niemals durch einen eigenen Setter umgehen.
 - Native Buffer-Löschung bei Neustart und Semaphore-Sichtbarkeit in einer
   wegwerfbaren Offline-Symcon-Instanz mit synthetischen Daten bestätigen.
-- Sicherstellen, dass Symcon weder Modulcode noch Vertrauensanker ändern kann
-  (einschließlich ACLs, Gruppen, Mounts und Dateierstellung im Elternverzeichnis).
-  Ein als root laufender oder entsprechend privilegierter Prozess erfüllt diese
-  Trennung nicht. Dann bleibt die Freischaltung blockiert, bis die Rechte
-  getrennt sind; ein öffentlicher PHP-Aufruf kann diese Grenze nicht herstellen.
+- Bei unprivilegierter Laufzeit sicherstellen, dass Symcon weder Modulcode noch
+  Vertrauensanker ändern kann (einschließlich ACLs, Gruppen und Mounts).
+  Bei der vorgesehenen root-Laufzeit ist diese Trennung grundsätzlich nicht
+  gegeben: Die privilegierte Manipulierbarkeit wird ausschließlich für den
+  kontrollierten Diagnoseversuch bewusst akzeptiert. Die festen Pfad-, Typ-,
+  Eigentümer-, Modus- und Symlinkprüfungen bleiben zwingend.
 - Ed25519-Schlüsselpaar außerhalb des Symcon-Rechners in der administrativen
   Schlüsselverwaltung erzeugen. Nur den Base64-Public-Key als einzelne Zeile
   extern in `/etc/robohub/eureka-b8.pub` installieren (root, z. B. Modus 0644;
@@ -257,7 +325,7 @@ explizite Vorprüfung mit Listenabruf ist weiterhin ein separater Aufruf.
   `docs/eureka-b8-diagnose.md`: Verweise auf diesen aktuellen Stand.
 - `docs/eureka-b8-bereitstellung.md`: Ablauf, Grenzen und Abschlussbericht.
 
-## G. Testergebnisse
+## G. Frühere Testergebnisse der Bereitstellung
 
 `bash tests/eureka/run-offline.sh` lief vollständig mit Exitcode 0 unter
 `bwrap --unshare-net`. Externes Netzwerk war für sämtliche Tests und ihre
@@ -316,8 +384,12 @@ gegen Administratoren schützen, die PHP-Code, beide Buffer oder den festen
 Vertrauensanker austauschen können. Die externe Signatur schützt vor autonomer
 Genehmigung durch unveränderten Modul-/Skriptcode ohne diesen Schlüssel, nicht
 vor einem kompromittierten Host. Liegt der private Schlüssel auf dem
-Symcon-Host oder kann Symcon den Vertrauensanker ändern, ist diese Architektur
-**nicht freischaltbar**. Kein ungeschützter Setter als Ersatz.
+Symcon-Host, bleibt die Freischaltung blockiert. Der private Signaturschlüssel
+bleibt ausschließlich auf **codex-dev**. Root kann grundsätzlich Vertrauensanker,
+Modulcode und Laufzeitdaten manipulieren; der öffentliche Schlüssel schützt
+nicht vor kompromittiertem Root. Diese Einschränkung wird für den kontrollierten
+Diagnoseversuch bewusst akzeptiert. Die EUID-0-Kompatibilität erzeugt selbst
+keine Genehmigung oder Freischaltung. Kein ungeschützter Setter als Ersatz.
 
 Die native 9.1-Benutzer-/Authentifizierungsprüfung, Buffer-/Semaphore-Prüfung
 und die Host-Rechteprüfung sind weiterhin
