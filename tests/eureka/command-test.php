@@ -462,6 +462,43 @@ $tests['E20: verschachtelte Plugin- und Panelwerte müssen übereinstimmen'] = s
     }
 };
 
+foreach ([['stop', 'start', ['fan' => 2, 'water' => 0, 'mode' => 8]],
+    ['cleaning', 'pause', []], ['pause', 'start', []], ['cleaning', 'station', []]] as [$state, $cmd, $params]) {
+    foreach (['fresh', 'limit', 'old', 'future', 'no-time', 'offline', 'unknown', 'invalid', 'shadow-offline',
+        'shadow-invalid', 'no-source', 'wrong-source', 'raw-offline', 'list-online-false', 'derived-online-true'] as $case) {
+        $tests['Manuelle Cloud-Listenverbindung ' . $state . '/' . $cmd . '/' . $case] = static function () use ($state, $cmd, $params, $case): void {
+            $d = commandDevice($state);
+            $d['roh']['connected'] = true; $d['verbindungEmpfangen'] = COMMAND_NOW;
+            unset($d['stand']['roh']['connected']); $d['stand']['online'] = false;
+            $d['stand']['statusquelle'] = ['quelle' => 'shadow-get', 'geraetezeit' => null];
+            switch ($case) {
+                case 'limit': $d['verbindungEmpfangen'] -= 120; break;
+                case 'old': $d['verbindungEmpfangen'] -= 121; break;
+                case 'future': $d['verbindungEmpfangen']++; break;
+                case 'no-time': unset($d['verbindungEmpfangen']); break;
+                case 'offline': $d['roh']['connected'] = false; break;
+                case 'unknown': unset($d['roh']['connected']); break;
+                case 'invalid': $d['roh']['connected'] = 'true'; break;
+                case 'shadow-offline': $d['stand']['roh']['connected'] = false; break;
+                case 'shadow-invalid': $d['stand']['roh']['connected'] = null; break;
+                case 'no-source': unset($d['stand']['statusquelle']); break;
+                case 'wrong-source': $d['stand']['statusquelle']['quelle'] = 'push'; break;
+                case 'raw-offline': $d['stand']['roh']['online'] = false; break;
+                case 'list-online-false': $d['roh']['online'] = false; break;
+                case 'derived-online-true': $d['stand']['online'] = true; break;
+            }
+            $vorher = $d;
+            $run = fn() => RoboHubEurekaBefehlsweg::vorbereiten($d, $cmd, $params, commandMappings(), COMMAND_NOW, true);
+            if (in_array($case, ['fresh', 'limit'], true)) {
+                commandAssert($run()['aktion'] === ($state === 'pause' ? 'resume' : $cmd));
+            } else { commandError($run); }
+            // Derselbe fehlende Shadow-Nachweis bleibt im automatischen und
+            // bestehenden Dock-Einmalvertrag unzureichend.
+            commandError(fn() => RoboHubEurekaBefehlsweg::vorbereiten($d, $cmd, $params, commandMappings(), COMMAND_NOW));
+            commandAssert($d === $vorher);
+        };
+    }
+}
 $errors = 0;
 // Warnungen (etwa implizite Typumwandlungen) sind ebenfalls Testfehler.
 set_error_handler(static function (int $severity, string $message): never { throw new RuntimeException('PHP-Warnung im Offline-Test.'); });

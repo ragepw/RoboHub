@@ -158,8 +158,9 @@ foreach ([true, false] as $cache) {
             foreach ([true, false] as $shadow) {
                 $t->response[0]['connected'] = $shadow;
                 $r = $t->zustand(commandBundle(), $d);
-                commandAssert($r['erreichbarkeit']['verbindung'] === $shadow);
-                commandAssert($r['erreichbarkeit']['quelle'] === 'shadow.connected');
+                $cacheOffline = $fresh && $cache === false && $shadow === true;
+                commandAssert($r['erreichbarkeit']['verbindung'] === ($cacheOffline ? false : $shadow));
+                commandAssert($r['erreichbarkeit']['quelle'] === ($cacheOffline ? 'geraetecache.connected' : 'shadow.connected'));
             }
         };
     }

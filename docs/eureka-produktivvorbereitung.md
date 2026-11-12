@@ -1,5 +1,11 @@
 # Eureka E20 Evo Plus: lokale Vorbereitung der Steuerung
 
+Fortgeschriebener Stand nach dem erfolgreichen Dock-Livebefund:
+[Reguläre IP-Symcon-Steuerung](eureka-regulaere-steuerung.md).
+Die folgenden Herstellerbelege gelten weiter; historische Aussagen zu
+unbestätigtem Docktransport, Startparameterübergabe und fehlendem Shadow-Online
+werden durch den neuen Bericht ersetzt. Keine Produktivfreigabe.
+
 Stand: 12.11.2026, Branch `feature/eureka-e20-evo-plus`. Nur lokale statische
 Analyse und Offline-Tests. Keine Cloud-Abfrage, Robotersteuerung, Änderung der
 Instanz 22708, Bereitstellung, Schlüssel-/Genehmigungsänderung, Commits oder Pushs.

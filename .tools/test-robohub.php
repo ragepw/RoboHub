@@ -34,6 +34,7 @@ $GLOBALS['NEXT'] = 60000;
 $GLOBALS['LOG'] = [];
 $GLOBALS['INST'] = [];     // InstanceID => Modulobjekt
 
+function IPS_GetKernelStartTime(): int { static $start; return $GLOBALS['KERNEL_START'] ?? ($start ??= time() - 3600); }
 function IPS_GetKernelRunlevel(): int { return $GLOBALS['KERNEL_RUNLEVEL'] ?? KR_READY; }
 function IPS_Sleep(int $ms): void {}
 function IPS_SetHidden(int $id, bool $v): bool { $GLOBALS['OBJ'][$id]['hidden'] = $v; return true; }
@@ -143,7 +144,7 @@ function IPS_GetVariable(int $id): array { return ['VariableChanged' => $GLOBALS
 function IPS_GetProperty(int $id, string $n) { return $GLOBALS['INST'][$id]->props[$n]; }
 function IPS_GetName(int $id): string { return $GLOBALS['OBJ'][$id]['name'] ?? $GLOBALS['NAMEN'][$id] ?? ('Instanz ' . $id); }
 function IPS_GetInstance(int $id): array { $m = $GLOBALS['INST'][$id] ?? null; return ['ConnectionID' => ($m && $m->parent) ? $m->parent->InstanceID : 0, 'InstanceStatus' => ($m && isset($m->status)) ? $m->status : 102,
-    'ModuleInfo' => ['ModuleID' => $m instanceof FakeSocket ? $m->modul : ($m instanceof RoboHubKonto ? '{DB269BEC-0CA6-4E6A-83B8-78FF8CFB2DB0}' : '')]]; }
+    'ModuleInfo' => ['ModuleID' => $m instanceof FakeSocket ? $m->modul : ($m instanceof RoboHubKonto ? '{DB269BEC-0CA6-4E6A-83B8-78FF8CFB2DB0}' : ($m instanceof RoboHubGeraet ? '{631DA85B-5985-4C25-B222-E47FDD49E302}' : ''))]]; }
 
 class IPSModule
 {
@@ -1972,6 +1973,7 @@ check('höchster News-Eintrag = library.json-Version', end($keys) === $lib['vers
 check('library.json nur Store-Felder', array_keys($lib) === ['id', 'author', 'name', 'url', 'compatibility', 'version', 'build', 'date']);
 
 require __DIR__ . '/test-eureka.inc.php';
+require __DIR__ . '/test-eureka-control.inc.php';
 require __DIR__ . '/test-parent.inc.php';
 
 abschnitt('Vertragshygiene');

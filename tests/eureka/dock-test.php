@@ -160,7 +160,8 @@ foreach ([true, false, null] as $liste) {
                         $anzeige = RoboHubEurekaZustand::erreichbarkeit($s['roh'], $g, $jetzt);
                         // Fehlendes connected ist unbekannt, niemals bestätigtes Offline.
                         sicher($anzeige['shadow'] === $shadow);
-                        sicher($anzeige['verbindung'] === ($shadow ?? ($listenalter <= 120 ? $liste : null)));
+                        $cacheOffline = $liste === false && $listenalter <= 120;
+                        sicher($anzeige['verbindung'] === ($cacheOffline ? false : ($shadow ?? ($listenalter <= 120 ? $liste : null))));
                         if ($liste === true && $shadow !== false && $listenalter <= 120 && $shadowalter <= 120) {
                             sicher(str_contains($k->EurekaDockVorpruefen(), 'bestanden'));
                         } else {

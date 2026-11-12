@@ -15,31 +15,38 @@ final class RoboHubEurekaBefehlsweg
     private array $zuordnungen;
     private $kontextLesen;
     private bool $verbraucht = false;
+    private bool $manuell;
+    private $versuch;
 
-    public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null, ?callable $kontextLesen = null)
+    public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null, ?callable $kontextLesen = null,
+        bool $manuell = false, ?callable $versuch = null)
     {
+        $this->manuell = $manuell;
+        $this->versuch = $versuch;
         $this->kontextLesen = $kontextLesen;
         $this->transport = $transport;
         $this->zuordnungen = $zuordnungen;
         $this->beiUnauthorized = $beiUnauthorized;
     }
 
-    public static function vorbereiten(array $geraet, string $befehl, array $parameter, array $zuordnungen, int $jetzt): array
+    public static function vorbereiten(array $geraet, string $befehl, array $parameter, array $zuordnungen, int $jetzt, bool $manuell = false): array
     {
         if (!in_array($befehl, ['start', 'pause', 'station'], true)) {
             throw new RoboHubFehler('Eureka: Dieser Befehl bleibt gesperrt.');
         }
         RoboHubEurekaProtokoll::pruefeZuordnung($geraet, $zuordnungen);
         $stand = $geraet['stand'] ?? [];
-        if (($geraet['online'] ?? null) !== true || !is_array($stand) ||
+        if (!is_array($stand) ||
             ($stand['deviceId'] ?? null) !== $geraet['id'] ||
             !is_int($stand['zeit'] ?? null) || $stand['zeit'] > $jetzt || $jetzt - $stand['zeit'] > 120 ||
             !is_array($stand['roh'] ?? null) ||
-            ($stand['roh']['connected'] ?? null) !== true ||
-            (array_key_exists('online', $stand) && $stand['online'] !== true)) {
+            !self::verbindungErlaubt($geraet, $stand, $jetzt, $manuell)) {
             throw new RoboHubFehler('Eureka: Kein aktueller, zugeordneter Online-Zustand.');
         }
         $roh = $stand['roh'];
+        if (array_key_exists('online', $roh) && $roh['online'] !== true) {
+            throw new RoboHubFehler('Eureka: Shadow meldet keinen verbundenen Zustand.');
+        }
         foreach (['id', 'deviceId'] as $feld) {
             if (array_key_exists($feld, $roh) &&
                 ((!is_string($roh[$feld]) && !is_int($roh[$feld])) || (string)$roh[$feld] !== $geraet['id'])) {
@@ -95,6 +102,25 @@ final class RoboHubEurekaBefehlsweg
             throw new RoboHubFehler('Eureka: Unerwartete Befehlsparameter.');
         }
         return ['pfad' => '/devices/commands/' . rawurlencode($geraet['id']), 'body' => ['data' => $hex], 'aktion' => $aktion];
+    }
+
+    /** Der bisherige strenge Vertrag bleibt Standard, insbesondere für Dock-Einmal. */
+    private static function verbindungErlaubt(array $g, array $s, int $jetzt, bool $manuell): bool
+    {
+        if (($g['online'] ?? null) !== true) { return false; }
+        if (array_key_exists('connected', $s['roh'])) {
+            return $s['roh']['connected'] === true &&
+                (!array_key_exists('online', $s) || $s['online'] === true);
+        }
+        // Nur die ausdrückliche Bedienaktion darf sich auf die frische Liste stützen.
+        // stand.online=false bedeutet hier fehlenden Shadow-Nachweis, niemals online=true.
+        $zeit = $g['verbindungEmpfangen'] ?? null;
+        return $manuell && ($g['roh']['connected'] ?? null) === true &&
+            (!array_key_exists('online', $g['roh']) || $g['roh']['online'] === true) &&
+            is_int($zeit) && $zeit > 0 && $zeit <= $jetzt && $jetzt - $zeit <= 120 &&
+            ($s['statusquelle']['quelle'] ?? null) === 'shadow-get' &&
+            ($s['statusquelle']['geraetezeit'] ?? null) === null &&
+            (!array_key_exists('online', $s) || $s['online'] === false);
     }
 
     /** Nur Cloud-Annahme; selbst ein gültiger Antwortframe beweist keine Bewegung. */
@@ -154,6 +180,9 @@ final class RoboHubEurekaBefehlsweg
                 $geraet = $kontext['geraet'];
                 $buendel = $kontext['buendel'];
                 $jetzt = $kontext['jetzt'];
+                if ($befehl === 'start' && $parameter === [] && ($geraet['stand']['roh']['state'] ?? null) !== 'pause') {
+                    $parameter = $kontext['startparameter'] ?? [];
+                }
             }
             if (($geraet['id'] ?? null) !== $id) {
                 throw new RoboHubFehler('Eureka: Gerätebindung geändert; kein Versand.');
@@ -170,15 +199,32 @@ final class RoboHubEurekaBefehlsweg
         if ($this->verbraucht) {
             throw new RoboHubFehler('Eureka: Befehlsversuch bereits verbraucht; kein doppelter Versand.');
         }
-        $plan = self::vorbereiten($geraet, $befehl, $parameter, $this->zuordnungen, $jetzt);
+        $plan = self::vorbereiten($geraet, $befehl, $parameter, $this->zuordnungen, $jetzt, $this->manuell);
         if (($buendel['region'] ?? null) !== 'eu' || !is_string($buendel['access_token'] ?? null) ||
             trim($buendel['access_token']) === '') {
             throw new RoboHubFehler('Eureka: Gültiges EU-Token-Bündel erforderlich.');
         }
         // Vor dem Transport setzen: gilt auch bei Timeout, Ausnahme und Reentranz.
         $this->verbraucht = true;
+        if (is_callable($this->versuch)) {
+            ($this->versuch)($geraet, $buendel, true);
+        }
+        // Derselbe lokale Kontext wird nach der HTTP-Vorbereitung nochmals geprüft.
+        $pruefen = function () use ($geraet, $buendel, $befehl, $parameter, $jetzt, $plan): void {
+            $g = $geraet; $b = $buendel; $zeit = $jetzt;
+            if (is_callable($this->kontextLesen)) {
+                $k = ($this->kontextLesen)($geraet['id'], $buendel);
+                $g = $k['geraet']; $b = $k['buendel']; $zeit = $k['jetzt'];
+            }
+            if ($g !== $geraet || $b !== $buendel ||
+                self::vorbereiten($g, $befehl, $parameter, $this->zuordnungen, $zeit, $this->manuell) !== $plan) {
+                throw new RoboHubFehler('Eureka: Befehlsgrundlage geändert; kein Versand.');
+            }
+            if (is_callable($this->versuch)) { ($this->versuch)($g, $b, false); }
+        };
         try {
-            $antwort = ($this->transport)('POST', $plan['pfad'], $buendel['access_token'], $plan['body']);
+            $pruefen();
+            $antwort = ($this->transport)('POST', $plan['pfad'], $buendel['access_token'], $plan['body'], $pruefen);
         } catch (Throwable $e) {
             // Transport-Ausnahmen dürfen keine Tokens, URLs oder Cloud-Freitexte ausgeben.
             throw new RoboHubFehler('Eureka: Befehlsverbindung fehlgeschlagen; Ausführung unklar, keine Wiederholung.');

@@ -1,6 +1,12 @@
 {
     "translations": {
         "de": {
+            "Cloud reports connected": "Cloud meldet verbunden",
+            "Cloud reports connected (device confirmation missing)": "Cloud meldet verbunden (Gerätebestätigung fehlt)",
+            "Eureka: suction for a new whole-home cleaning": "Eureka: Saugstufe für eine neue Ganzhausreinigung",
+            "Eureka: water for a new whole-home cleaning": "Eureka: Wasserstufe für eine neue Ganzhausreinigung",
+            "Not selected (new start blocked)": "Nicht gewählt (neuer Start gesperrt)",
+            "0 (no water)": "0 (kein Wasser)",
             "Cloud status fetch successful": "Cloud-Statusabruf erfolgreich",
             "Connection status": "Verbindungsstatus",
             "Online confirmed": "Online bestätigt",

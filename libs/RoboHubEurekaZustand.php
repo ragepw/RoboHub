@@ -97,9 +97,9 @@ final class RoboHubEurekaZustand
     }
 
     /**
-     * Nur Anzeige: expliziter Shadowwert vor höchstens 120 s alter Geräteliste.
+     * Explizites Offline hat Vorrang; sonst Shadow vor frischer Geräteliste.
      * Die Grenze beschränkt lokales Cachealter, beweist keine Gerätefrische.
-     * Kein Ersatz für connected im Shadow bei Befehlen oder GetActivity().
+     * Manuelle Befehle prüfen die Liste separat; kein Ersatz für GetActivity().
      */
     public static function erreichbarkeit(array $shadow, array $geraet, int $jetzt): array
     {
@@ -108,11 +108,13 @@ final class RoboHubEurekaZustand
         $zeit = $geraet['verbindungEmpfangen'] ?? null;
         $alter = is_int($zeit) && $zeit > 0 && $zeit <= $jetzt ? $jetzt - $zeit : null;
         $quelle = $wert !== null ? 'shadow.connected' : 'unbekannt';
-        if ($wert === null && $cache !== null && $alter !== null && $alter <= 120) {
+        if (($wert === null || ($wert === true && $cache === false)) &&
+            $cache !== null && $alter !== null && $alter <= 120) {
             $wert = $cache;
             $quelle = 'geraetecache.connected';
         }
         return ['verbindung' => $wert, 'shadow' => self::verbunden($shadow),
+            'bewertung' => $wert === false ? 'offline' : ($wert === true ? 'cloud-verbunden' : 'unbekannt'),
             'geraetecache' => $cache, 'cachealter' => $alter,
             'quelle' => $quelle, 'empfangen' => $jetzt];
     }

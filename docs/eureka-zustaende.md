@@ -135,7 +135,9 @@ werden weiter als Fehler zum Gerät transportiert und nicht als `connected=false
 erfunden. Nur explizite boolesche `connected`-Werte werden ausgewertet; fehlende,
 null, Strings und Zahlen bedeuten unbekannt.
 
-Die Anzeige bewertet zuerst `shadow.connected` (true/false). Fehlt ein gültiger
+Die Anzeige gibt einem expliziten Offlinebefund Vorrang: Shadow false oder
+ein frischer Listeneintrag false sperrt auch einen widersprüchlichen positiven
+Befund. Ansonsten bewertet sie zuerst `shadow.connected` (true/false). Fehlt ein gültiger
 Shadowwert, darf `roh.connected` der Geräteliste einspringen, wenn deren lokale
 Empfangszeit `verbindungEmpfangen` positiv, nicht zukünftig und höchstens 120
 Sekunden alt ist. Diese konservative Anzeigegrenze ist eine lokale Regel, kein
@@ -157,7 +159,8 @@ frischen Abfrage zuverlässig die tatsächliche Verbindung meldet, wurde ohne
 Cloudzugriff nicht verifiziert. Auch ein frischer Listenbefund ist lediglich
 eine aktuelle Cloudmeldung mit unbekanntem Alter des zugrunde liegenden Signals.
 
-`erreichbarkeit` enthält `verbindung` (true/false/null, nur Anzeige), `shadow`
+`erreichbarkeit` enthält `verbindung` (true/false/null), `bewertung`
+(`offline`, `cloud-verbunden`, `unbekannt`), `shadow`
 und `geraetecache` (jeweils expliziter Rohbefund oder null), `cachealter`
 (Sekunden oder null bei unbekannter/ungültiger Zeit), `quelle`
 (`shadow.connected`, `geraetecache.connected`, `unbekannt`) und `empfangen`
@@ -172,7 +175,7 @@ individuelle Gerätekennungen enthalten können.
 | --- | --- | --- |
 | `Erreichbar` | Boolean, unverändert | Nur Shadow-`connected=true` ergibt true. false bedeutet offline **oder nicht belegt**, niemals zwingend offline. Auch ein positiver frischer Cache ändert diese Altvariable nicht. |
 | `CloudStatusAbruf` (neu, nur Eureka) | Boolean | Letzter Statusabruf vollständig erfolgreich; bei Konto-/Cloud-/Antwortfehler false. Keine Aussage über Geräteverbindung oder Gerätezeit. |
-| `Verbindungsstatus` (neu, nur Eureka) | String | „Online bestätigt“, „Offline bestätigt“, „Verbindung unbekannt“ nach obiger Quellenregel. Bestätigt bedeutet explizite Cloudmeldung, kein direkter Gerätehandshake. Abruffehler ergibt unbekannt. |
+| `Verbindungsstatus` (neu, nur Eureka) | String | „Cloud meldet verbunden“, „Offline bestätigt“, „Verbindung unbekannt“ nach obiger Quellenregel. Ohne Shadowbestätigung steht zusätzlich „Gerätebestätigung fehlt“. Dies ist eine explizite Cloudmeldung, kein direkter Gerätehandshake. Abruffehler ergibt unbekannt. |
 
 Die neuen Variablen entstehen beim ersten erfolgreichen Eureka-Statusabruf;
 auch wenn `connected` fehlt. Es werden keine Aktionen freigegeben. Alle Anzeigen
@@ -213,11 +216,14 @@ cloudseitig veraltete Antwort ist ohne Gerätezeit nicht zuverlässig erkennbar.
 Es werden keine geratenen Zeitstempelnamen oder Einheiten interpretiert.
 
 Der vorbereitete Befehlsweg verwirft weiterhin lokale Schnappschüsse über
-120 Sekunden, Zukunftszeiten und fehlende/ungültige Zeiten. Zusätzlich verlangt
-er jetzt `connected===true` im Shadow selbst, beachtet ein effektives
-`stand.online=false` und fordert einen explizit leeren Fehlerbefund. Allein ein
-neues lokales `zeit` nach GET beweist weiterhin keine Gerätefrische; vor späterer
-Steuerfreigabe muss diese Grenze zusätzlich gelöst werden.
+120 Sekunden, Zukunftszeiten und fehlende/ungültige Zeiten. Der automatische Weg
+verlangt weiterhin `connected===true` im Shadow selbst und einen explizit
+leeren Fehlerbefund. Der normale manuelle Bedienweg kann bei vollständig
+fehlendem Shadowfeld eine frische positive Liste mit korrekt zugeordnetem
+Shadow derselben Sitzung und Laufzeit verwenden. Die vollständigen Bedingungen
+stehen in [Reguläre Steuerung](eureka-regulaere-steuerung.md). Dock-Einmal
+behält seine bisherigen Genehmigungsregeln. Allein ein neues lokales `zeit`
+nach GET beweist weiterhin keine Gerätefrische; die Grenze bleibt sichtbar.
 
 ## Symcon-Variablen und vorbereiteter Befehlsweg
 

@@ -1,5 +1,26 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## Reguläre Steuerung nach Docknachweis (12.11.2026)
+
+Aktuelle Implementierung, Sicherheitsgrenzen, Aktivierungsweg und getrennte
+spätere Start-/Pause-Tests: [Steuerungsdokumentation](../../docs/eureka-regulaere-steuerung.md).
+`command-test.php` prüft zusätzlich 60 Kombinationen der manuellen
+Cloudlistenbewertung. `.tools/test-eureka-control.inc.php` prüft den nativen
+RequestAction-Weg mit 22708/22284 als lokale Doubles, expliziten Startwerten,
+persistiertem Verbrauch, Geräte-/Sitzungsprüfung und Neustart.
+`diagnostic-http-test.php` prüft weitere 36 Fälle am echten gemeinsamen
+HTTPS-Code bei deaktiviertem cURL. Eine ausschließlich im Prüfprozess
+umbenannte Treiberkopie verwendet Testprofil und erfundene ID; der echte
+Produktivtreiber bleibt gesperrt. Beide vollständigen Runner ausführen:
+`bash tests/eureka/run-offline.sh` und `bash tests/eureka/run-dock-offline.sh`.
+
+Abschluss: beide Runner Exitcode 0; 344 Befehls-, 683 Zustands-, 77 HTTP-,
+244 Dock- und 72 Tokenprüfungen ohne Fehler, alle B8-/Importregressionen
+bestanden. Abschließender RoboHub-Gesamtprüfstand: 1.266 bestanden, darunter
+56 neue native Steuerungsprüfungen. 88 PHP-Dateien ohne Syntaxfehler;
+`git diff --check` fehlerfrei. Einzelzahlen und Nachweisgrenzen stehen im
+aktuellen Steuerungsbericht; die folgenden Abschnitte dokumentieren ältere Stände.
+
 ## B8-Parser und Steuerungsvorbereitung, 12.11.2026
 
 Aktuelle Beleglage, Formatvertrag und Grenzen:

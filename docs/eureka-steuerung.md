@@ -1,5 +1,10 @@
 # Eureka E20 Evo Plus: lokal vorbereiteter Befehlsweg
 
+Aktueller Steuerungsstand nach bestätigtem Dockversuch:
+[Reguläre IP-Symcon-Steuerung](eureka-regulaere-steuerung.md).
+Dieser Bericht bewahrt die frühere Beleglage; dessen Transport-/Onlineblocker
+werden dort aktualisiert. Die Produktivsteuerung bleibt gesperrt.
+
 Aktueller Stand 12.11.2026: [Produktivvorbereitung](eureka-produktivvorbereitung.md)
 mit erneutem Herstellerbeleg für Start/Pause/Station, engeren Startparametern
 (Fan 1–3, Akku über 15 %), erweitertem B8-Antwortparser und nativen

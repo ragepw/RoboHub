@@ -178,7 +178,7 @@ try {
         $raw = json_decode($eg->Rohdaten(), true);
         $activity = json_decode($eg->GetActivity(), true);
         check('Frischer Cache ergänzt nur die Anzeige ' . json_encode($cache),
-            variable(9601, 'Verbindungsstatus')['value'] === ($cache ? 'Online bestätigt' : 'Offline bestätigt')
+            variable(9601, 'Verbindungsstatus')['value'] === ($cache ? 'Cloud meldet verbunden (Gerätebestätigung fehlt)' : 'Offline bestätigt')
             && variable(9601, 'CloudStatusAbruf')['value'] === true
             && variable(9601, 'Erreichbar')['value'] === false
             && $activity['state'] === -1 && $activity['validUntil'] === 0
@@ -197,7 +197,7 @@ try {
         check('Eureka Cloud und Dreizustandsanzeige ' . json_encode($connected),
             variable(9601, 'CloudStatusAbruf')['value'] === true
             && variable(9601, 'Verbindungsstatus')['value'] === match ($connected) {
-                true => 'Online bestätigt', false => 'Offline bestätigt', null => 'Verbindung unbekannt',
+                true => 'Cloud meldet verbunden', false => 'Offline bestätigt', null => 'Verbindung unbekannt',
             }
             && variable(9601, 'Erreichbar')['value'] === ($connected === true)
             && count($et->pfade) === $before + 1);

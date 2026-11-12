@@ -35,12 +35,16 @@ function IPS_SemaphoreLeave(string $name): void
 }
 function IPS_SetProperty(int $id, string $name, $value): void {}
 function IPS_ApplyChanges(int $id): void {}
+function IPS_GetKernelStartTime(): int { return 1799990000; }
 function IPS_GetInstance(int $id): array { return ['ConnectionID' => 0]; }
 class IPSModule
 {
     public int $InstanceID;
     public array $attrs = [];
     public array $logs = [];
+    public array $buffers = [];
+    public function GetBuffer(string $n): string { return $this->buffers[$n] ?? ''; }
+    public function SetBuffer(string $n, string $v): void { $this->buffers[$n] = $v; }
     public function __construct(int $id) { $this->InstanceID = $id; }
     public function ReadAttributeString(string $name): string { return (string)($this->attrs[$name] ?? ''); }
     public function WriteAttributeString(string $name, string $value): void { $this->attrs[$name] = $value; }
@@ -458,9 +462,9 @@ foreach (['current', 'state', 'removed', 'session', 'same-token-session', 'lock-
         $w = new RoboHubEurekaBefehlsweg(static function () use (&$calls): array { $calls++; return commandResponse(); }, commandMappings(), null, $callback);
         try {
             $run = fn() => $w->ausfuehren(buendel(), commandDevice('pause'), 'start', [], COMMAND_NOW);
-            if ($case === 'current') { pruefe($run()['angenommen']); }
-            else { fehler($run); }
-            pruefe($calls === ($case === 'current' ? 1 : 0) && $t->aufrufe === 0 && $GLOBALS['locks'] === []);
+            // Konto 123 ist kein freigegebenes Bedienkonto 45174.
+            fehler($run);
+            pruefe($calls === 0 && $t->aufrufe === 0 && $GLOBALS['locks'] === []);
         } finally { unset($GLOBALS['timeoutName']); }
     };
 }

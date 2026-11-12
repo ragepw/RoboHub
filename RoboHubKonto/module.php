@@ -123,6 +123,7 @@ class RoboHubKonto extends IPSModule
         // Administrativer B8-Einmalversuch; verbrauchte Einträge niemals automatisch löschen.
         $this->RegisterAttributeString('EurekaB8Diagnose', '{}');
         $this->RegisterAttributeString('EurekaDockVersuch', '{}');
+        $this->RegisterAttributeString('EurekaBefehlsversuch', '{}');
         // Zweistufige Anmeldung (Ecovacs-Gerätebestätigung): Zwischenstand bis zum Code.
         $this->RegisterAttributeString('AnmeldeVorstufe', '');
         $this->RegisterAttributeString('Geraete', '[]');
@@ -1015,7 +1016,11 @@ class RoboHubKonto extends IPSModule
                 return $this->treiber()->zuruecksetzen($buendel, $geraet, (string)($anfrage['Teil'] ?? ''));
             }
             if ($aktion === 'befehl') {
-                return $this->treiber()->befehl($buendel, $geraet, (string)($anfrage['Befehl'] ?? ''), (array)($anfrage['Parameter'] ?? []));
+                $treiber = $this->treiber();
+                if ($treiber instanceof RoboHubEureka) {
+                    $treiber->manuelleBedienung = ($anfrage['Bedienung'] ?? null) === 'manuell';
+                }
+                return $treiber->befehl($buendel, $geraet, (string)($anfrage['Befehl'] ?? ''), (array)($anfrage['Parameter'] ?? []));
             }
         } catch (RoboHubFehler $e) {
             $this->verarbeiteFehler($e, $this->ReadPropertyString('Hersteller') === 'eureka' ? null : $sitzung);
@@ -1690,19 +1695,25 @@ class RoboHubKonto extends IPSModule
         if ($treiber instanceof RoboHubEureka) {
             // Nur für den späteren Befehlsaufruf merken; keine neue Sperre im Lesepfad.
             $sitzung = [$this->ReadAttributeString('Buendel'), $this->ReadAttributeString('BuendelRevision')];
-            $treiber->befehlsKontext = function (string $id, array $buendel) use ($sitzung): array {
-                // Ausschließlich Attribute; kein GET/Refresh unter der Gerätesperre.
-                if ($this->ReadPropertyString('Hersteller') !== 'eureka' ||
-                    $this->buendelStand() !== $sitzung ||
-                    (json_decode($sitzung[0], true) ?: []) !== $buendel) {
-                    throw new RoboHubFehler('Eureka: Kontobindung geändert; kein Versand.');
+            $treiber->befehlsKontext = fn(string $id, array $buendel): array => $this->eurekaSteuerKontext($id, $buendel, $sitzung);
+            $treiber->befehlsVersuch = function (array $g, array $b, bool $verbrauchen) use ($sitzung): void {
+                $k = $this->eurekaSteuerKontext($g['id'], $b, $sitzung);
+                if ($k['geraet'] !== $g) { throw new RoboHubFehler('Eureka: Befehlsgrundlage geändert.'); }
+                $fingerprint = hash('sha256', serialize([$g['id'], $g['stand'], $sitzung]));
+                $alt = json_decode($this->ReadAttributeString('EurekaBefehlsversuch'), true);
+                if (!is_array($alt) || ($alt !== [] && (!is_string($alt['stand'] ?? null) ||
+                    !preg_match('/\A[a-f0-9]{64}\z/D', $alt['stand']) || count($alt) !== 1))) {
+                    throw new RoboHubFehler('Eureka: Befehlsverbrauch unklar; kein Versand.');
                 }
-                foreach (json_decode($this->ReadAttributeString('Geraete'), true) ?: [] as $geraet) {
-                    if (($geraet['id'] ?? null) !== $id) { continue; }
-                    $geraet['stand'] = (array)((json_decode($this->ReadAttributeString('Schnappschuss'), true) ?: [])[$id]['p'] ?? []);
-                    return ['geraet' => $geraet, 'buendel' => $buendel, 'jetzt' => time()];
+                if ($verbrauchen) {
+                    if (($alt['stand'] ?? null) === $fingerprint) {
+                        throw new RoboHubFehler('Eureka: Zustandsstand bereits für eine Bedienaktion verbraucht; zuerst neu lesen.');
+                    }
+                    $this->WriteAttributeString('EurekaBefehlsversuch', json_encode(['stand' => $fingerprint], JSON_THROW_ON_ERROR));
                 }
-                throw new RoboHubFehler('Eureka: Gerätebindung fehlt; kein Versand.');
+                if ((json_decode($this->ReadAttributeString('EurekaBefehlsversuch'), true)['stand'] ?? null) !== $fingerprint) {
+                    throw new RoboHubFehler('Eureka: Befehlsverbrauch nicht bestätigt; kein Versand.');
+                }
             };
             $treiber->beiUnauthorized = function (string $access): array {
                 return $this->gueltigesBuendel($access);
@@ -1713,6 +1724,61 @@ class RoboHubKonto extends IPSModule
             $treiber->echtzeitVerbunden = (json_decode((string)$this->ReadAttributeString('Mqtt'), true)['zustand'] ?? '') === 'verbunden';
         }
         return $treiber;
+    }
+
+    /** Nur lokale Daten unter der Gerätesperre; feste vorhandene Bedieninstanz. */
+    private function eurekaSteuerKontext(string $id, array $b, array $sitzung): array
+    {
+        $jetzt = time();
+        if ($this->InstanceID !== 45174 || $this->ReadPropertyString('Hersteller') !== 'eureka' ||
+            $this->ReadPropertyString('Region') !== 'eu' || $this->buendelStand() !== $sitzung ||
+            ($sitzung[1] ?? '') === '' || (json_decode($sitzung[0], true) ?: []) !== $b ||
+            $this->ReadAttributeInteger('WarteBis') > $jetzt) {
+            throw new RoboHubFehler('Eureka: Konto, Sitzung oder Cloud-Sperre verweigert den Befehl.');
+        }
+        RoboHubEurekaDiagnose::buendelPruefen($b, $jetzt);
+        if (!IPS_InstanceExists(22708) ||
+            (IPS_GetInstance(22708)['ModuleInfo']['ModuleID'] ?? null) !== '{631DA85B-5985-4C25-B222-E47FDD49E302}' ||
+            (IPS_GetInstance(22708)['ConnectionID'] ?? null) !== $this->InstanceID ||
+            IPS_GetProperty(22708, 'GeraetID') !== $id || IPS_GetProperty(22708, 'Deaktiviert') !== false ||
+            IPS_GetObjectIDByIdent('Befehl', 22708) !== 22284) {
+            throw new RoboHubFehler('Eureka: Vorhandene Bedieninstanz oder Befehlsvariable nicht eindeutig gebunden.');
+        }
+        $liste = json_decode($this->ReadAttributeString('Geraete'), true);
+        if (!is_array($liste) || !array_is_list($liste)) { throw new RoboHubFehler('Eureka: Gerätecache ungültig.'); }
+        $treffer = array_values(array_filter($liste, fn($g) => is_array($g) && ($g['id'] ?? null) === $id));
+        if (count($treffer) !== 1) { throw new RoboHubFehler('Eureka: Gerätebindung nicht eindeutig.'); }
+        $g = $treffer[0];
+        $g['stand'] = (json_decode($this->ReadAttributeString('Schnappschuss'), true) ?: [])[$id]['p'] ?? [];
+        $ident = RoboHubEurekaDiagnose::modellPruefen($g);
+        $roh = $g['stand']['roh'] ?? [];
+        if (!is_array($roh)) { throw new RoboHubFehler('Eureka: Shadow-Daten ungültig.'); }
+        foreach (['productModel', 'sn8', 'protoVersion', 'platform', 'stationType', 'panel', 'product'] as $feld) {
+            if (array_key_exists($feld, $roh)) {
+                $vergleich = $g;
+                $vergleich['roh'] = array_replace($g['roh'], [$feld => $roh[$feld]]);
+                if (RoboHubEurekaDiagnose::modellPruefen($vergleich) !== $ident) {
+                    throw new RoboHubFehler('Eureka: Shadow-Geräteidentifikation widersprüchlich.');
+                }
+            }
+        }
+        foreach ([$this->ReadAttributeInteger('GeraeteStand'), $g['verbindungEmpfangen'] ?? null] as $zeit) {
+            if (!is_int($zeit) || $zeit <= 0 || $zeit > $jetzt || $jetzt - $zeit > 120) {
+                throw new RoboHubFehler('Eureka: Aktuelle Geräteliste erforderlich.');
+            }
+        }
+        $laufzeit = $this->GetBuffer('EurekaSteuerLaufzeit');
+        $kernelstart = IPS_GetKernelStartTime();
+        if ($laufzeit === '' || ($g['stand']['befehlsLaufzeit'] ?? null) !== $laufzeit ||
+            !is_int($kernelstart) || $kernelstart <= 0 || $kernelstart > $jetzt ||
+            ($g['stand']['kernelstart'] ?? null) !== $kernelstart ||
+            ($g['stand']['sitzung'] ?? null) !== $sitzung[1] ||
+            ($g['stand']['statusquelle']['quelle'] ?? null) !== 'shadow-get') {
+            throw new RoboHubFehler('Eureka: Shadow aus aktueller Sitzung und Modullaufzeit erforderlich.');
+        }
+        return ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt,
+            'startparameter' => ['fan' => IPS_GetProperty(22708, 'EurekaStartSaugstufe'),
+                'water' => IPS_GetProperty(22708, 'EurekaStartWasserstufe'), 'mode' => 8]];
     }
 
     private function treiberNeu(): RoboHubTreiber
@@ -1881,6 +1947,12 @@ class RoboHubKonto extends IPSModule
             $rohstand = ['deviceId' => $did, 'zeit' => $jetzt, 'roh' => (array)($daten['roh'] ?? []),
                 'online' => ($daten['online'] ?? false) === true,
                 'statusquelle' => $daten['statusquelle'] ?? null];
+            if ($this->GetBuffer('EurekaSteuerLaufzeit') === '') {
+                $this->SetBuffer('EurekaSteuerLaufzeit', bin2hex(random_bytes(32)));
+            }
+            $rohstand['befehlsLaufzeit'] = $this->GetBuffer('EurekaSteuerLaufzeit');
+            $rohstand['sitzung'] = $this->ReadAttributeString('BuendelRevision');
+            $rohstand['kernelstart'] = IPS_GetKernelStartTime();
         }
         $this->schnappschussMerken($did, (string)($geraet['modell'] ?? ''), $rohstand);
 

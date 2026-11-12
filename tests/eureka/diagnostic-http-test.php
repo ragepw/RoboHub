@@ -243,6 +243,56 @@ $tests['Dock-Flag erlaubt weder Start/Pause noch B8 oder Versand ohne Berechtigu
     gesperrt(fn()=>$t->invoke(new RoboHubEureka(),'POST','/devices/commands/offline-e20','offline',['data'=>RoboHubEurekaDock::BEFEHL]));
     sicher($GLOBALS['httpCalls'] === []);
 };
+require_once __DIR__ . '/control-driver-fixture.php';
+require_once __DIR__ . '/command-fixtures.php';
+require_once __DIR__ . '/command-lock-fixture.php';
+foreach ([['stop', 'start', ['fan' => 2, 'water' => 0, 'mode' => 8]],
+    ['cleaning', 'pause', []], ['pause', 'start', []], ['cleaning', 'station', []]] as [$state, $cmd, $params]) {
+    foreach ([200, 401, 429, 500, 307, 'timeout', 'options-false', 'options-exception', 'context-change'] as $case) {
+        $tests['Normaler Befehl im echten gemeinsamen HTTP-Code ' . $state . '/' . $cmd . '/' . $case] = function () use ($state, $cmd, $params, $case): void {
+            unset($GLOBALS['vorCurl'], $GLOBALS['beiOptionen']);
+            $GLOBALS['httpCalls'] = []; $GLOBALS['execCalls'] = 0;
+            $GLOBALS['status'] = is_int($case) ? $case : 200;
+            $GLOBALS['response'] = $case === 'timeout' ? false : '{"errorCode":0}';
+            $GLOBALS['optionErgebnis'] = $case !== 'options-false';
+            $GLOBALS['optionException'] = $case === 'options-exception';
+            $g = e20Fixture()['geraet'];
+            unset($g['stand']['roh']['connected']);
+            $g['stand']['roh']['state'] = $g['stand']['roh']['parentState'] = $state;
+            $g['stand']['zeit'] = $g['verbindungEmpfangen'] = time();
+            $g['stand']['online'] = false;
+            $g['stand']['statusquelle'] = ['quelle' => 'shadow-get', 'geraetezeit' => null];
+            $b = ['region' => 'eu', 'access_token' => 'offline-only']; $verbrauch = false;
+            $t = new OfflineFreigegebenEureka(); $t->manuelleBedienung = true;
+            $t->befehlsKontext = function () use (&$g, $b): array { return ['geraet' => $g, 'buendel' => $b, 'jetzt' => time()]; };
+            $t->befehlsVersuch = function ($geraet, $bundle, bool $neu) use (&$verbrauch): void {
+                if ($neu) { if ($verbrauch) { throw new RoboHubFehler('Verbraucht'); } $verbrauch = true; }
+                sicher($verbrauch);
+            };
+            $GLOBALS['vorCurl'] = function () use (&$verbrauch): void { sicher($verbrauch); };
+            if ($case === 'context-change') {
+                $GLOBALS['beiOptionen'] = function () use (&$g): void { $g['stand']['roh']['state'] = 'error'; };
+            }
+            try {
+                if ($case === 200) { sicher(str_contains($t->befehl($b, $g, $cmd, $params), 'nicht bestätigt')); }
+                else { gesperrt(fn() => $t->befehl($b, $g, $cmd, $params)); }
+                gesperrt(fn() => $t->befehl($b, $g, $cmd, $params));
+                sicher($GLOBALS['execCalls'] === (in_array($case, ['options-false', 'options-exception', 'context-change'], true) ? 0 : 1));
+                sicher(count($GLOBALS['httpCalls']) === 1);
+                $call = $GLOBALS['httpCalls'][0]; $o = $call['options'];
+                sicher($call['url'] === 'https://euprod.mzrobo.com/devices/commands/offline-e20');
+                sicher($o[CURLOPT_CUSTOMREQUEST] === 'POST' && $o[CURLOPT_FOLLOWLOCATION] === false && $o[CURLOPT_MAXREDIRS] === 0);
+                sicher($o[CURLOPT_HTTP_VERSION] === CURL_HTTP_VERSION_1_1 && $o[CURLOPT_FRESH_CONNECT] === true && $o[CURLOPT_FORBID_REUSE] === true);
+                sicher($o[CURLOPT_HTTPAUTH] === CURLAUTH_NONE && $o[CURLOPT_PROXYAUTH] === CURLAUTH_NONE && $o[CURLOPT_PROXY] === '' && in_array('Expect:', $o[CURLOPT_HTTPHEADER], true));
+                $expected = $cmd === 'start' ? ($state === 'pause' ? RoboHubEurekaProtokoll::fortsetzen() : RoboHubEurekaProtokoll::start(2, 0, 8))
+                    : ($cmd === 'pause' ? RoboHubEurekaProtokoll::pause() : RoboHubEurekaDock::BEFEHL);
+                sicher(json_decode($o[CURLOPT_POSTFIELDS], true) === ['data' => $expected]);
+            } finally {
+                unset($GLOBALS['vorCurl'], $GLOBALS['beiOptionen'], $GLOBALS['optionErgebnis'], $GLOBALS['optionException']);
+            }
+        };
+    }
+}
 $fehler = 0;
 foreach ($tests as $name => $fn) {
     try { $fn(); echo 'OK: ' . $name . "\n"; }

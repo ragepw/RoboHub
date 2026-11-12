@@ -23,6 +23,9 @@ class RoboHubEureka implements RoboHubTreiber
 
     /** Lokaler Konto-/Gerätekontext, nach Erwerb der Gerätesperre erneut lesen. */
     public $befehlsKontext = null;
+    public $befehlsVersuch = null;
+    public bool $manuelleBedienung = false;
+    private ?array $steuerTransport = null;
 
     protected function jetzt(): int
     {
@@ -36,6 +39,7 @@ class RoboHubEureka implements RoboHubTreiber
     private const BEFEHLE_FREIGEGEBEN = false;
     // Keine bestätigte E20-Befehlsfreigabe vorhanden. Keine Modell-Heuristik.
     private const BEFEHLS_ZUORDNUNGEN = [];
+    private const BEFEHLS_GERAET_ID = '';
 
     protected function transport(
         string $method,
@@ -45,21 +49,33 @@ class RoboHubEureka implements RoboHubTreiber
     ): array {
         // Zweite, vom befehl()-Einstieg unabhängige Sperre VOR Headern und cURL.
         if (str_starts_with($path, '/devices/commands')) {
-            throw new RoboHubFehler('Eureka: Produktiver Befehls-Transport gesperrt.');
+            if (!self::BEFEHLE_FREIGEGEBEN || $this->steuerTransport === null ||
+                [$method, $path, $token, $body] !== $this->steuerTransport['auftrag']) {
+                throw new RoboHubFehler('Eureka: Produktiver Befehls-Transport gesperrt.');
+            }
+            return $this->httpAusfuehren($method, $path, $token, $body, $this->steuerTransport['pruefen']);
         }
         return $this->httpAusfuehren($method, $path, $token, $body);
     }
 
-    /** Gemeinsame HTTPS-Implementierung für GETs und separate B8-/Dock-Einmalpfade. */
+    /** Gemeinsame HTTPS-Implementierung für GETs, Befehle und B8-/Dock-Einmalpfade. */
     protected function httpAusfuehren(string $method, string $path, string $token, ?array $body, ?callable $diagnosePruefung = null, bool $dock = false): array
     {
         // Auch die gemeinsame unterste Transportgrenze bleibt für Normalbefehle zu.
         if (str_starts_with($path, '/devices/commands')) {
-            if ($method !== 'POST' || !preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
-                $body !== ['data' => ($dock ? RoboHubEurekaDock::BEFEHL : RoboHubEurekaDiagnose::BEFEHL)] || $token === '' || $diagnosePruefung === null) {
-                throw new RoboHubFehler('Eureka: Befehls-Transport ohne Diagnoseberechtigung gesperrt.');
+            $normal = self::BEFEHLE_FREIGEGEBEN && !$dock && $this->steuerTransport !== null &&
+                $diagnosePruefung === $this->steuerTransport['pruefen'] &&
+                [$method, $path, $token, $body] === $this->steuerTransport['auftrag'];
+            if ($normal) {
+                // Exakter geprüfter Plan, dieselbe HTTPS-Implementierung wie Dock.
+                $diagnosePruefung();
+            } else {
+                if ($method !== 'POST' || !preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
+                    $body !== ['data' => ($dock ? RoboHubEurekaDock::BEFEHL : RoboHubEurekaDiagnose::BEFEHL)] || $token === '' || $diagnosePruefung === null) {
+                    throw new RoboHubFehler('Eureka: Befehls-Transport ohne Diagnoseberechtigung gesperrt.');
+                }
+                $diagnosePruefung();
             }
-            $diagnosePruefung();
         }
         $headers = [
             'Accept-Language: en',
@@ -460,17 +476,31 @@ class RoboHubEureka implements RoboHubTreiber
         if (!self::BEFEHLE_FREIGEGEBEN) {
             throw new RoboHubFehler('Eureka: Steuerbefehle noch nicht freigegeben.');
         }
-        if (!is_callable($this->befehlsKontext)) {
+        if (self::BEFEHLS_GERAET_ID === '' || ($geraet['id'] ?? null) !== self::BEFEHLS_GERAET_ID) {
+            throw new RoboHubFehler('Eureka: Separat bestätigte Befehlsgerätebindung fehlt.');
+        }
+        if (!is_callable($this->befehlsKontext) || !is_callable($this->befehlsVersuch)) {
             throw new RoboHubFehler('Eureka: Lokale Kontextprüfung fehlt; kein Versand.');
         }
         // Das Konto liefert bereits ein erneuertes und persistiertes Bündel.
         // Eine neue Instanz entspricht genau einem Versuch, ohne POST-Wiederholung.
         $weg = new RoboHubEurekaBefehlsweg(
-            fn(string $method, string $path, string $token, ?array $body): array =>
-                $this->transport($method, $path, $token, $body),
+            function (string $method, string $path, string $token, ?array $body, callable $pruefen): array {
+                if ($this->steuerTransport !== null) {
+                    throw new RoboHubFehler('Eureka: Befehls-Transport bereits belegt.');
+                }
+                $this->steuerTransport = ['auftrag' => [$method, $path, $token, $body], 'pruefen' => $pruefen];
+                try {
+                    return $this->transport($method, $path, $token, $body);
+                } finally {
+                    $this->steuerTransport = null;
+                }
+            },
             self::BEFEHLS_ZUORDNUNGEN,
             $this->beiUnauthorized,
-            $this->befehlsKontext
+            $this->befehlsKontext,
+            $this->manuelleBedienung,
+            $this->befehlsVersuch
         );
         return $weg->befehl($buendel, $geraet, $befehl, $parameter, $this->jetzt());
     }
