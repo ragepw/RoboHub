@@ -1,13 +1,51 @@
 # Eureka E20: Zustände und lesende Protokollabfragen
 
-Stand: 11.11.2026, Originalplugin 2.5.4 (`release_e20`, Produktkennung
+Stand: 12.11.2026. Ergänzt um die vom Nutzer gelieferten real beobachteten
+E20-Evo-Plus-Shadowkombinationen; keine eigene Cloud-Abfrage. Statische Basis: Originalplugin 2.5.4 (`release_e20`, Produktkennung
 `750Y0015`). Grundlage ist der lokale
 [E20-Analysebericht](../../eureka-plugin-analyse/analyse-2.5.4/E20-Analysebericht.md),
 ergänzt durch erneutes statisches Lesen der dort verzeichneten Bundles. Die
 Shadow-Namen stammen aus `const.py` der lokalen HA-Referenz, Commit `ce933e6`.
 Es wurden keine Originaldateien in RoboHub übernommen und kein Plugin-Code
-ausgeführt. Tabellen und Testdaten beschreiben Protokollfakten bzw. synthetische
-Kombinationen; sie sind keine aufgezeichneten E20-Cloudantworten.
+ausgeführt. Die B8-Tabellen beschreiben statische Protokollfakten; die ältere Shadowmatrix
+enthält abgeleitete Kombinationen. Die folgende Messmatrix und
+`tests/eureka/observed-shadow-fixtures.php` enthalten dagegen die vom Nutzer
+bestätigten Statusfelder ohne individuelle Kennungen.
+
+## Real bestätigte Shadowkombinationen (12.11.2026)
+
+| state | parentState | cleanMissionState | Vorher | Nachher |
+| --- | --- | --- | --- | --- |
+| `cleaning` | `cleaning` | `no_cleaning_mission` | Reinigt (1) | Reinigt (1) |
+| `pause` | `pause` | `have_cleaning_mission` | Pausiert (2) | Pausiert (2) |
+| `charging_back` | `charging_back` | `no_cleaning_mission` | Rückfahrt (3) | Rückfahrt (3) |
+| `charging` | `charging` | `no_cleaning_mission` | Lädt (4) | Lädt (4) |
+| `collecting_dust` | `collecting_dust` | `no_cleaning_mission` | Unbekannt (-1) | Stationsarbeit (6), Herstellerstatus „Entleert Staub“ |
+| `ERP_model` | `sleep` | `no_cleaning_mission` | Unbekannt (-1) | Schläft (8) |
+
+„Rückfahrt“ verwendet die bestehende Profilbeschriftung „Fährt zur Station“.
+Staubentleerung passt zu `ZUSTAND_STATIONSARBEIT` (6), das bereits Absaugen
+umfasst. Die genaue Tätigkeit erscheint in `ZustandRoh` als
+`Entleert Staub (collecting_dust / collecting_dust)` und damit auch im
+Herstellerstatus der Kachel. Das gemeinsame Zahlenprofil bleibt unverändert;
+ein eigener Zahlenwert würde das bestehende herstellerneutrale Modell erweitern.
+
+Alle sechs Beobachtungen enthalten `batteryLevel=100`, `deviceFault=[]`,
+`fanLevel="3"`, `waterLevel="2"`, `autoType="room_cleaning"` und **kein**
+`connected`. Akku und Saugstufe werden wie bisher übernommen; Wasser/AutoType
+bleiben Rohdaten ohne neue Einstellungen. Die neuen Zuordnungen für
+`collecting_dust` und `ERP_model` gelten nur bei der exakt belegten
+Parent-/Mission-Kombination. Fehlende, unbekannte oder widersprüchliche Werte
+bleiben unbekannt. Für die vier schon bekannten Zustände bleibt die bisherige
+Konsistenzregel bestehen. `no_cleaning_mission` ist nach der Reinigungsmessung
+kein Beleg gegen Reinigung; `have_cleaning_mission` allein beweist keine Pause.
+Auch Akku 100 ändert `charging` nicht in „Geladen“. Andere ERP-Kombinationen
+werden nicht pauschal als Schlaf, Pause oder Laden interpretiert.
+
+Nur diese sechs Kombinationen sind real bestätigt. Alle übrigen bisherigen
+Cloudzuordnungen, Parent-Gruppierungen und B8-Übersetzungen bleiben statisch
+abgeleitet; insbesondere existiert kein Live-Beleg für die Gleichsetzung der
+neuen Cloudnamen mit bestimmten B8-Bytes, für Gerätefrische oder Befehlsfähigkeit.
 
 ## Statusnormalisierung
 
@@ -93,8 +131,9 @@ von `supportReturnDustByTime`; daraus entsteht keine RoboHub-Befehlsfreigabe.
 
 Ein HTTP-200 bestätigt nur den Abruf der Cloud. `online=true` wird nur aus
 explizit booleschem `connected=true` der zugeordneten Shadow-Antwort gebildet.
-Ein explizites `connected=false` im Gerätecache ist ein konservatives Veto.
-Ein positiver Gerätecache ersetzt keine fehlende Shadow-Verbindungsmeldung;
+Ein explizites Shadow-`connected=true` hat für die Anzeige Vorrang vor einem
+alten negativen Gerätecache. Shadow-`false` bleibt false. Der Cache ist nur
+Diagnoseinformation und ersetzt keine fehlende Shadow-Verbindungsmeldung;
 der Cache kann bis zu einer Stunde alt sein. Strings und Zahlen werden nicht
 zu Verbindungsnachweisen umgewandelt. `erreichbarkeit` erhält den dreistufigen
 Befund (true/false/null), Quelle und lokale Empfangszeit. Im booleschen
@@ -139,6 +178,8 @@ Umnummerierung als Rohwert angezeigt, ungültige Typen ausgelassen. Wie bisher
 behält Symcon optionale Variablen bei fehlenden Werten; etwa ein vorheriger
 Akkustand bleibt der letzte bekannte Messwert. Es wird keine Nullmessung erfunden.
 Neue Variablen, Auswahloptionen oder Schreibaktionen werden nicht angelegt.
+Nur beim bestätigten Staubentleeren ergänzt ein lesbarer Herstellerstatus das
+bisherige Rohtextformat; die vollständige Rohantwort bleibt unverändert.
 
 Der automatische Abruf bleibt bestehen: Reinigung/Rückfahrt nutzen den schon
 vorhandenen aktiven 30-Sekunden-Takt, Pause/Laden/Schlaf das konfigurierte
@@ -147,10 +188,13 @@ umgebaut. GET-401 rotiert und persistiert weiterhin zentral, mit genau einem
 Lese-Retry. Token-Tests prüfen die bestehenden Konkurrenz- und Abmeldepfade.
 
 Anzeige und Befehlsplaner teilen nun die Parent-Konsistenzprüfung. Der Planer
-bleibt enger: nur `cleaning`, `pause`, `stop`, `charging`, `charging_finish`;
+behält zusätzlich sein Cache-Veto und bleibt enger: nur `cleaning`, `pause`, `stop`, `charging`, `charging_finish`;
 `on_station` ist mangels eindeutigen Lade-/Auftragsbefunds nicht länger als
-Neustartgrund zugelassen. Spezialpausen, Schlaf, Rückfahrt und unbekannte
-Zustände bleiben gesperrt. Die Freigabekonstante bleibt false, die produktive
+Neustartgrund zugelassen. Spezialpausen, Schlaf, Rückfahrt, Staubentleerung und unbekannte
+Zustände bleiben gesperrt. Die neuen Anzeigezustände erweitern keine
+Befehlsgruppen. Die sechs gemessenen Antworten scheitern bereits am fehlenden
+Shadow-`connected`; ein erfolgreicher GET und eine lesbare Aktivität sind keine
+Online- oder Befehlsfreigabe. Die Freigabekonstante bleibt false, die produktive
 Zuordnung leer und die Transportsperre vor cURL bestehen. Keine neue
 Live-Abfrage, kein Befehl und keine automatische POST-Wiederholung.
 

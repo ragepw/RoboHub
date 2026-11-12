@@ -285,11 +285,11 @@ class RoboHubEureka implements RoboHubTreiber
 
         // Der Gerätecache kann bis zu einer Stunde alt sein. Sein positives
         // connected ist daher kein Ersatz für eine fehlende Shadow-Meldung.
-        // Ein explizites Nein im Cache bleibt ein konservatives Veto.
+        // Ein aktuelles explizites Shadow-Signal hat Vorrang vor dem alten Cache.
         $verbunden = RoboHubEurekaZustand::verbunden($p);
         $cache = is_array($geraet['roh'] ?? null)
             ? RoboHubEurekaZustand::verbunden($geraet['roh']) : null;
-        $daten['online'] = $verbunden === true && $cache !== false;
+        $daten['online'] = $verbunden === true;
         $daten['erreichbarkeit'] = ['shadow' => $verbunden, 'geraetecache' => $cache,
             'quelle' => 'shadow.connected', 'empfangen' => $this->jetzt()];
         // Empfangszeit ist ausdrücklich keine bestätigte Gerätezeit.
@@ -312,7 +312,8 @@ class RoboHubEureka implements RoboHubTreiber
 
         $daten = [
             'Zustand' => $bewertung['zustand'],
-            'ZustandRoh' => $roh,
+            'ZustandRoh' => isset($bewertung['herstellerstatus'])
+                ? $bewertung['herstellerstatus'] . ' (' . $roh . ')' : $roh,
             'Akku' => is_int($p['batteryLevel'] ?? null) && $p['batteryLevel'] >= 0 && $p['batteryLevel'] <= 100
                 ? $p['batteryLevel'] : null,
         ];

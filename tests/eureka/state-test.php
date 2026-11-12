@@ -1,8 +1,9 @@
 <?php
 declare(strict_types=1);
 
-// Ausschließlich synthetische Daten. Jeder Transport ist ersetzt.
+// Anonymisierte Beobachtungen und synthetische Gegenproben. Jeder Transport ist ersetzt.
 require_once __DIR__ . '/command-fixtures.php';
+require_once __DIR__ . '/observed-shadow-fixtures.php';
 $tests = [];
 
 // Erwartungen unabhängig als Tabelle aus E20-Analysebericht §6/7 und HA const.py.
@@ -116,16 +117,29 @@ foreach ([true, false, null, 0, 1, 'true', 'false', '1', [], ''] as $i => $conne
         commandAssert($t->geraete(commandBundle())[0]['online'] === ($connected === true));
     };
 }
-$tests['Erfolgreicher GET und positiver Gerätecache beweisen kein online'] = static function (): void {
+$tests['GET beweist kein online; aktuelles Shadow-Signal geht vor Cache'] = static function (): void {
     $t = new StateEureka(); $d = commandDevice(); $d['roh']['connected'] = true;
     $t->response = [['state' => 'cleaning']];
     $r = $t->zustand(commandBundle(), $d);
     commandAssert(!$r['online'] && $r['erreichbarkeit']['shadow'] === null);
     $d['roh']['connected'] = false; $t->response[0]['connected'] = true;
-    commandAssert(!$t->zustand(commandBundle(), $d)['online']);
+    commandAssert($t->zustand(commandBundle(), $d)['online']);
     $d['roh']['connected'] = true; $t->response[0]['connected'] = false;
     commandAssert(!$t->zustand(commandBundle(), $d)['online']);
 };
+foreach ([true, false, null] as $shadow) {
+    foreach ([true, false, null] as $cache) {
+        $tests['Shadow/Cache-Vorrang ' . json_encode([$shadow, $cache])] = static function () use ($shadow, $cache): void {
+            $t = new StateEureka(); $d = commandDevice();
+            $d['roh']['connected'] = $cache;
+            $t->response = [['state' => 'charging', 'parentState' => 'charging']];
+            if ($shadow !== null) { $t->response[0]['connected'] = $shadow; }
+            $r = $t->zustand(commandBundle(), $d);
+            commandAssert($r['online'] === ($shadow === true));
+            commandAssert($r['erreichbarkeit']['shadow'] === $shadow && $r['erreichbarkeit']['geraetecache'] === $cache);
+        };
+    }
+}
 $tests['GET wählt das Ziel statt des ersten Listeneintrags'] = static function (): void {
     $t = new StateEureka(); $d = commandDevice();
     $target = ['deviceId' => $d['id'], 'state' => 'pause', 'parentState' => 'cleaning', 'connected' => true];
@@ -182,6 +196,50 @@ foreach ([
         $b = array_values(unpack('C*', hex2bin($golden)));
         commandAssert(count($b) === 13 && $b[1] === 12 && $b[9] === 3 && (array_sum(array_slice($b, 1)) & 255) === 0);
     };
+}
+
+foreach (observedE20Shadows() as $fixture) {
+    $tests['Live bestätigt: ' . $fixture['shadow']['state']] = static function () use ($fixture): void {
+        $p = $fixture['shadow'];
+        $t = new StateEureka(); $d = commandDevice(); $d['roh']['connected'] = false;
+        $t->response = [$p];
+        $r = $t->zustand(commandBundle(), $d);
+        commandAssert($r['werte']['Zustand'] === $fixture['zustand'] && $r['zustandsbewertung']['konsistent']);
+        commandAssert($r['werte']['Akku'] === 100 && $r['werte']['Saugstufe'] === '3' && $r['werte']['Fehler'] === 'Keine Fehler');
+        commandAssert($r['roh'] === $p && $r['schreibbar'] === [] && $r['optionen'] === []);
+        commandAssert(!$r['online'] && $r['erreichbarkeit']['shadow'] === null);
+        $locale = json_decode(file_get_contents(__DIR__ . '/../../libs/locale.json'), true)['translations']['de'];
+        RoboHubText::setzen(static fn(string $text): string => $locale[$text] ?? $text);
+        try {
+            $label = $r['zustandsbewertung']['herstellerstatus'] ?? RoboHubModell::zustandsName($fixture['zustand'], RoboHubModell::KLASSE_SAUGER);
+            commandAssert($label === $fixture['anzeige']);
+        } finally { RoboHubText::setzen(null); }
+        $d['stand']['roh'] = $p;
+        foreach (['start', 'pause', 'station'] as $command) {
+            commandError(fn() => commandPlan($d, $command, []));
+            commandError(fn() => $t->befehl(commandBundle(), $d, $command, []));
+        }
+        commandAssert(count($t->calls) === 1);
+        if (in_array($p['state'], ['ERP_model', 'collecting_dust'], true)) {
+            // Selbst mit künstlich positivem connected entsteht keine neue Planerfreigabe.
+            $d['stand']['roh']['connected'] = true; unset($d['roh']['connected']);
+            foreach (['start', 'pause', 'station'] as $command) {
+                commandError(fn() => commandPlan($d, $command, ['fan' => 2, 'water' => 0, 'mode' => 8]));
+            }
+            commandAssert(str_contains($r['werte']['ZustandRoh'], $p['state'] . ' / ' . $p['parentState']));
+        }
+    };
+}
+foreach (['ERP_model', 'collecting_dust'] as $state) {
+    foreach (['', 'sleep', 'cleaning', 'charging', 'ERP_model', 'collecting_dust', [], false] as $i => $parent) {
+        foreach ([null, 'no_cleaning_mission', 'have_cleaning_mission', 'unknown', []] as $j => $mission) {
+            if ($mission === 'no_cleaning_mission' && $parent === ($state === 'ERP_model' ? 'sleep' : $state)) { continue; }
+            $tests['Neue Werte ohne passenden Beleg ' . $state . ' / ' . $i . ' / ' . $j] = static function () use ($state, $parent, $mission): void {
+                $r = RoboHubEurekaZustand::shadow(['state' => $state, 'parentState' => $parent, 'cleanMissionState' => $mission]);
+                commandAssert($r['zustand'] === -1 && !$r['konsistent']);
+            };
+        }
+    }
 }
 
 $errors = 0;

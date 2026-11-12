@@ -20,6 +20,38 @@ ab: `product.sn8=750Y0015`, verschachteltes `product.plugin` und `panel` Version
 2.5.4. IDs und Statuswerte sind erfunden. `command-fixtures.php` enthält nur eine
 simulierte Referenzzuordnung, kein produktives Geräteprofil.
 
+## Statuskorrektur mit realen Beobachtungen (12.11.2026, Basis 0a68f09)
+
+`observed-shadow-fixtures.php` enthält die sechs vom Nutzer gelieferten
+E20-Evo-Plus-Statuskombinationen samt gemeinsamen Statusfeldern, ohne Kennungen
+und ohne erfundenes `connected`. Die älteren Geräte-/Befehlsfixtures bleiben
+synthetische Gegenproben. [Zuordnung und Grenzen](../../docs/eureka-zustaende.md)
+trennen reale Messungen von statischen Annahmen.
+
+`state-test.php` prüft die realen Kombinationen über den GET-Weg, Anzeige,
+Rohdatenerhalt, unbekannte Erreichbarkeit und Befehlssperren. Weitere Gegenproben
+verwerfen nicht belegte Parent-/Mission-Kombinationen der neuen Namen.
+Die Geräteintegration prüft alle sechs Fälle durch Konto und Gerätemodul,
+Variablen, Abrufintervall und jeweils Start/Pause/Station ohne Transport.
+Ein aktuelles boolesches Shadow-Verbindungssignal bestimmt die Anzeige auch bei
+altem negativem Gerätecache; ohne Signal bleibt der Befund unbekannt. Der
+vorbereitete Befehlsweg behält seine strengeren Prüfungen einschließlich Cache-Veto.
+
+Lokale Prüfung auf `codex-dev`, PHP 8.2.35, unter
+`bwrap --unshare-net --dev-bind / / -- …` (externe Netzzugriffe unterbunden):
+
+- Zustandsprüfstand: **668 bestanden, 0 Fehler**.
+- Befehlsprüfstand: **233 bestanden, 0 Fehler**.
+- Token-/GET-Prüfstand: **72 bestanden, 0 Fehler**.
+- Gesamtprüfstand einschließlich Parent-Verwaltung und 24 neuer
+  E20-Integrationsprüfungen: **1.175 bestanden, 0 Fehler**.
+- PHP-Lint: **67 Dateien ohne Syntaxfehler**; `git diff --check` fehlerfrei.
+
+Produktionsfreigabe weiterhin false, produktive Gerätezuordnung leer,
+Transportsperre vor cURL unverändert. Keine produktive Installation, Cloud-Anfrage,
+Roboterbefehle, proprietären Dateien, individuellen Kennungen, Commits oder Pushs.
+Die fehlende Gerätezeit und die native Symcon-Laufzeit bleiben ungeprüfte Grenzen.
+
 ## Statuskorrektur nach statischer Pluginanalyse (11.11.2026, Basis 124a86f)
 
 [Zustands- und Protokollbericht](../../docs/eureka-zustaende.md): konkrete

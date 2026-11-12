@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 // Der gesamte Transport bleibt offline; Konto, Konfigurator und Gerät sind echt.
 require_once __DIR__ . '/../tests/eureka/e20-fixture.php';
+require_once __DIR__ . '/../tests/eureka/observed-shadow-fixtures.php';
 abschnitt('Eureka: Integration im Lesebetrieb');
 class IntegrationEureka extends RoboHubEureka
 {
@@ -86,10 +87,31 @@ try {
             && variable(9601, 'ZustandRoh')['value'] === $state . ' / ' . $parent
             && $eg->ReadAttributeString('Schreibbar') === '[]');
     }
+    foreach (observedE20Shadows() as $fixture) {
+        $et->shadow = $fixture['shadow'];
+        $eg->Aktualisieren();
+        $stand = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'];
+        $expectedRaw = $et->shadow['state'] . ' / ' . $et->shadow['parentState'];
+        if ($fixture['zustand'] === 6) { $expectedRaw = 'Entleert Staub (' . $expectedRaw . ')'; }
+        check('Beobachteter E20-Status bis Gerätemodul: ' . $et->shadow['state'],
+            variable(9601, 'Zustand')['value'] === $fixture['zustand']
+            && variable(9601, 'ZustandRoh')['value'] === $expectedRaw
+            && variable(9601, 'Erreichbar')['value'] === false
+            && variable(9601, 'Akku')['value'] === 100 && variable(9601, 'Fehler')['value'] === 'Keine Fehler'
+            && $stand['roh'] === $et->shadow && $stand['online'] === false
+            && $eg->timers['Abruf'] === (in_array($fixture['zustand'], [1, 3, 6], true) ? 30000 : 120000)
+            && $eg->ReadAttributeString('Schreibbar') === '[]');
+        $before = count($et->pfade);
+        foreach (['start', 'pause', 'station'] as $command) {
+            $result = json_decode($ek->ForwardData(json_encode(['Aktion' => 'befehl', 'Geraet' => 'offline-e20', 'Befehl' => $command])), true);
+            check('Beobachteter E20-Status gibt keinen Befehl frei: ' . $et->shadow['state'] . '/' . $command,
+                !$result['ok'] && count($et->pfade) === $before);
+        }
+    }
     $et->shadow = ['state' => 'pause', 'parentState' => 'cleaning', 'deviceFault' => ['class' => 3, 'code' => 1]];
     $eg->Aktualisieren();
     $offlineStand = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'];
-    check('Fehlendes connected bleibt unerreichbar, Warnung bleibt erhalten und Stand sperrt Befehle',
+    check('Fehlendes connected belegt keine Erreichbarkeit; Warnung bleibt erhalten und Stand sperrt Befehle',
         variable(9601, 'Erreichbar')['value'] === false && variable(9601, 'Zustand')['value'] === 2
         && json_decode(variable(9601, 'Fehler')['value'], true) === ['class' => 3, 'code' => 1]
         && $offlineStand['online'] === false && $offlineStand['statusquelle']['quelle'] === 'shadow-get'

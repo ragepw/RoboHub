@@ -31,6 +31,17 @@ final class RoboHubEurekaZustand
     {
         $state = $p['state'] ?? '';
         $parent = $p['parentState'] ?? '';
+        // Ausschließlich die vom Nutzer beobachteten E20-Shadowkombinationen.
+        // Keine allgemeine ERP-/Stationsheuristik aus diesen Einzelbelegen.
+        if (($p['cleanMissionState'] ?? null) === 'no_cleaning_mission') {
+            if ($state === 'collecting_dust' && $parent === 'collecting_dust') {
+                return ['zustand' => RoboHubModell::ZUSTAND_STATIONSARBEIT, 'konsistent' => true,
+                    'herstellerstatus' => 'Entleert Staub'];
+            }
+            if ($state === 'ERP_model' && $parent === 'sleep') {
+                return ['zustand' => RoboHubModell::ZUSTAND_SCHLAF, 'konsistent' => true];
+            }
+        }
         $zustand = RoboHubModell::ZUSTAND_UNBEKANNT;
         $konsistent = is_string($state) && is_string($parent);
         if ($konsistent && isset(self::SHADOW[$state])) {
