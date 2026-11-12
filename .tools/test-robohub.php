@@ -1975,6 +1975,7 @@ check('library.json nur Store-Felder', array_keys($lib) === ['id', 'author', 'na
 require __DIR__ . '/test-eureka.inc.php';
 require __DIR__ . '/test-eureka-control.inc.php';
 require __DIR__ . '/test-eureka-pause.inc.php';
+require __DIR__ . '/test-eureka-parent.inc.php';
 require __DIR__ . '/test-parent.inc.php';
 
 abschnitt('Vertragshygiene');

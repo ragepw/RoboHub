@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 // Echte Module, nur die Symcon-Laufzeit ist nachgebildet. Keine Anmeldung und kein Netz.
+// Roborock vertritt hier die unveränderte generische Migration ohne Echtzeit.
+// Eurekas Verzicht auf automatische Migration wird separat in test-eureka-parent.inc.php geprüft.
 abschnitt('Parent-Migration: Virtual IO, Rückfall und Herstellerwechsel');
 $parentStand = [];
 foreach (['INST', 'NAMEN', 'ERZEUGT', 'GELOESCHT', 'CONNECTS', 'SKRIPTE', 'robohubTreiberFabrik'] as $key) {
@@ -36,12 +38,12 @@ try {
     $alt = new FakeSocket(200100);
     $alt->status = 104;
     IPS_SetName($alt->InstanceID, 'Client Socket (RoboHub Konto)');
-    $ek = parentKonto('eureka', $alt);
+    $ek = parentKonto('roborock', $alt);
     $ek->ApplyChanges();
-    check('Eureka: Konsole erhält Zeit vor dem Parent-Wechsel', $ek->parent === $alt && $ek->timers['Verbindung'] === 15000);
+    check('Roborock: Konsole erhält Zeit vor dem Parent-Wechsel', $ek->parent === $alt && $ek->timers['Verbindung'] === 15000);
     $ek->VerbindungPruefen();
     $io = $ek->parent;
-    check('Eureka: inaktiver Client Socket ohne RoboHub-Präfix wird durch aktiven Virtual IO abgelöst', $io !== $alt
+    check('Roborock: inaktiver Client Socket ohne RoboHub-Präfix wird durch aktiven Virtual IO abgelöst', $io !== $alt
         && $io->modul === $virtual && $io->status === IS_ACTIVE);
     check('Alter fremder Socket bleibt unverändert erhalten', IPS_InstanceExists($alt->InstanceID)
         && IPS_GetName($alt->InstanceID) === 'Client Socket (RoboHub Konto)' && $alt->status === 104 && $alt->config === ['Open' => false]);
@@ -50,7 +52,7 @@ try {
     $anzahl = count($GLOBALS['INST']);
     for ($i = 0; $i < 3; $i++) { $ek->ApplyChanges(); $ek->VerbindungPruefen(); }
     check('Wiederholtes ApplyChanges und VerbindungPruefen erzeugt keine Duplikate', $ek->parent === $io && count($GLOBALS['INST']) === $anzahl);
-    check('Eureka erhält keine Socket-Einstellungen oder Ping-Timer', $ek->GetConfigurationForParent() === '{}'
+    check('Roborock erhält keine Socket-Einstellungen oder Ping-Timer', $ek->GetConfigurationForParent() === '{}'
         && $ek->timers['MqttPing'] === 0 && $io->gesendet === []);
 
     $ek->WriteAttributeString('Mqtt', '{"zustand":"verbunden","host":"alt","topics":4}');
@@ -62,15 +64,15 @@ try {
     $ek->ReceiveData('{"Buffer":"verspaetete Daten"}');
     $ek->MqttPing();
     $ek->MessageSink(0, $alt->InstanceID, IM_CHANGESTATUS, [IS_ACTIVE]);
-    check('Eureka verwirft alte Echtzeitdaten und ignoriert Socket-Eingänge', $ek->GetBuffer('MqttEingang') === '' && $ek->GetBuffer('WsZiel') === ''
+    check('Roborock verwirft alte Echtzeitdaten und ignoriert Socket-Eingänge', $ek->GetBuffer('MqttEingang') === '' && $ek->GetBuffer('WsZiel') === ''
         && !isset(json_decode($ek->ReadAttributeString('Mqtt'), true)['host']) && !$ek->ReadAttributeBoolean('EchtzeitJeVerbunden')
         && $ek->ReadAttributeInteger('EchtzeitGesperrtBis') === 0 && $io->gesendet === []);
 
-    foreach (['dreame', 'eureka', 'mova', 'eureka'] as $marke) {
+    foreach (['dreame', 'roborock', 'mova', 'roborock'] as $marke) {
         $ek->props['Hersteller'] = $marke;
         $ek->ApplyChanges();
         $ek->VerbindungPruefen();
-        check('Herstellerwechsel zu ' . $marke . ': passender Parent ohne alten Echtzeitstand', $ek->parent === ($marke === 'eureka' ? $io : $alt)
+        check('Herstellerwechsel zu ' . $marke . ': passender Parent ohne alten Echtzeitstand', $ek->parent === ($marke === 'roborock' ? $io : $alt)
             && $ek->GetBuffer('WsZiel') === '' && (json_decode($ek->ReadAttributeString('Mqtt'), true)['zustand'] ?? '') !== 'verbunden');
     }
     check('Herstellerwechsel verwendet vorherige Parents wieder', count($GLOBALS['INST']) === $anzahl);
@@ -89,7 +91,7 @@ try {
     $geteilt = new FakeSocket(200102);
     IPS_SetName($geteilt->InstanceID, 'RoboHub Echtzeit (geteilt)');
     $anderes = parentKonto('dreame', $geteilt);
-    $wechsel = parentKonto('eureka', $geteilt);
+    $wechsel = parentKonto('roborock', $geteilt);
     $wechsel->ApplyChanges();
     $wechsel->VerbindungPruefen();
     check('Geteilter Socket bleibt für das andere Konto verbunden und unverändert', $anderes->parent === $geteilt
@@ -105,7 +107,7 @@ try {
     check('Echtzeitkonto erhält eigenen Socket statt fremden geteilten Socket zu ändern', $zweites->parent !== $geteilt
         && $zweites->parent->modul === $client && $anderes->parent === $geteilt && $geteilt->config === ['Open' => false]);
 
-    $fehler = parentKonto('eureka', $alt);
+    $fehler = parentKonto('roborock', $alt);
     $fehler->ApplyChanges();
     $GLOBALS['CONNECT_FEHLER'] = [true, false];
     $fehler->VerbindungPruefen();
@@ -114,7 +116,7 @@ try {
     $fehler->VerbindungPruefen();
     check('Wiederholung schließt Migration ab', $fehler->parent->modul === $virtual && $fehler->timers['Verbindung'] === 0);
 
-    $fehler2 = parentKonto('eureka', $alt);
+    $fehler2 = parentKonto('roborock', $alt);
     $fehler2->ApplyChanges();
     $anzahl = count($GLOBALS['INST']);
     $GLOBALS['CONNECT_FEHLER'] = ['exception', false];
@@ -136,7 +138,7 @@ try {
     $fehler2->VerbindungPruefen();
     check('Explizites ApplyChanges erlaubt nach Fehlerbehebung neue Migration', $fehler2->parent->modul === $virtual);
 
-    $rueckfall = parentKonto('eureka', $alt);
+    $rueckfall = parentKonto('roborock', $alt);
     $rueckfall->ApplyChanges();
     $GLOBALS['CONNECT_FEHLER'] = [true, 'exception'];
     $rueckfall->VerbindungPruefen();
@@ -148,7 +150,7 @@ try {
 
     $behalten = new FakeSocket(200103);
     $behalten->modul = $virtual;
-    $f = parentKonto('eureka', $alt);
+    $f = parentKonto('roborock', $alt);
     $GLOBALS['CONNECT_FEHLER'] = [true, false];
     $f->VerbindungPruefen();
     check('Wiederverwendeter fremder Virtual IO wird bei Fehler nicht gelöscht', IPS_InstanceExists($behalten->InstanceID) && $f->parent === $alt);
@@ -180,10 +182,10 @@ try {
         $k->VerbindungPruefen();
         check('Wechsel Virtual IO zu ' . $marke . ' verwendet WebSocket und erhält alten Parent', $k->parent->modul === $websocket
             && IPS_InstanceExists($behalten->InstanceID) && $k->GetBuffer('WsZiel') === '');
-        $k->props['Hersteller'] = 'eureka';
+        $k->props['Hersteller'] = 'roborock';
         $k->ApplyChanges();
         $k->VerbindungPruefen();
-        check('Wechsel ' . $marke . ' zu Eureka verwendet vorherigen Virtual IO', $k->parent === $behalten && $k->timers['MqttPing'] === 0);
+        check('Wechsel ' . $marke . ' zu Roborock verwendet vorherigen Virtual IO', $k->parent === $behalten && $k->timers['MqttPing'] === 0);
     }
 
     $aktivIo = new FakeSocket(200104);
@@ -192,7 +194,7 @@ try {
     $aktiv->ApplyChanges();
     $aktiv->VerbindungPruefen();
     $aktivIo->config = json_decode($aktiv->GetConfigurationForParent(), true);
-    $aktiv->props['Hersteller'] = 'eureka';
+    $aktiv->props['Hersteller'] = 'roborock';
     $aktiv->ApplyChanges();
     $aktiv->VerbindungPruefen();
     $aktiv->props['Hersteller'] = 'dreame';
@@ -222,7 +224,7 @@ try {
     $vorbereitung->VerbindungPruefen();
     check('Nach Freigabe der Sperre wird die Verbindung hergestellt', $vorbereitung->parent->modul === $client);
 
-    $start = parentKonto('eureka', $alt);
+    $start = parentKonto('roborock', $alt);
     $GLOBALS['KERNEL_RUNLEVEL'] = 10102;
     $start->ApplyChanges();
     $start->VerbindungPruefen();
@@ -242,7 +244,7 @@ try {
         && $fremdKonto->GetConfigurationForParent() === '{}' && $GLOBALS['SKRIPTE'] === [] && IPS_InstanceExists($fremdIo->InstanceID));
 
     $konsoleIo = new FakeSocket(200106);
-    $rennen = parentKonto('eureka', $alt);
+    $rennen = parentKonto('roborock', $alt);
     $anzahl = count($GLOBALS['INST']);
     $GLOBALS['CONNECT_HOOK'] = static function (int $kind, int $ziel) use ($rennen, $konsoleIo): void {
         if ($kind === $rennen->InstanceID) {
@@ -297,7 +299,7 @@ try {
     $erst->VerbindungPruefen();
     $ersterSocket = $erst->parent;
     check('Erstinstallation ohne Konsolen-Parent erhält verzögert den Client Socket', $ersterSocket->modul === $client);
-    foreach (['eureka', 'dreame', 'mova', 'husqvarna', 'gardena', 'eureka'] as $marke) {
+    foreach (['roborock', 'dreame', 'mova', 'husqvarna', 'gardena', 'roborock'] as $marke) {
         IPS_SetProperty($erst->InstanceID, 'Hersteller', $marke);
         $vorgabe = json_decode($erst->GetCompatibleParents(), true);
         $erst->ApplyChanges();
@@ -305,7 +307,7 @@ try {
         check('Herstellerwechsel ' . $marke . ': angebotener und verbundener Parent stimmen überein',
             $erst->parent->modul === $vorgabe['modules'][0]['moduleID']);
     }
-    check('Selbst angelegter Eureka-Virtual-IO wird genau einmal explizit aktiviert',
+    check('Selbst angelegter Roborock-Virtual-IO wird genau einmal explizit aktiviert',
         $erst->parent->config === ['Open' => true] && $erst->parent->status === IS_ACTIVE && $erst->parent->applyAnzahl === 1);
 
     $GLOBALS['INST'] = [];
@@ -325,17 +327,17 @@ try {
         && $konsole->parent->config === ['Open' => true] && $konsole->parent->applyAnzahl === 1 && count($GLOBALS['INST']) === 2);
 
     $GLOBALS['INST'] = [];
-    $ohneKonsole = parentKonto('eureka');
+    $ohneKonsole = parentKonto('roborock');
     $ohneKonsole->ApplyChanges();
     $ohneKonsole->VerbindungPruefen();
-    check('Eureka-Erstinstallation ohne Konsole erhält direkt einen aktiven Virtual IO',
+    check('Roborock-Erstinstallation ohne Konsole erhält direkt einen aktiven Virtual IO',
         $ohneKonsole->parent->modul === $virtual && $ohneKonsole->parent->config === ['Open' => true]
         && $ohneKonsole->parent->status === IS_ACTIVE && $ohneKonsole->parent->applyAnzahl === 1);
 
     foreach (['false', 'exception', 'inaktiv'] as $art) {
         $GLOBALS['INST'] = [];
         $alterSocket = new FakeSocket(202000);
-        $k = parentKonto('eureka', $alterSocket);
+        $k = parentKonto('roborock', $alterSocket);
         $GLOBALS['IO_APPLY_FEHLER'] = $art;
         $GLOBALS['IO_APPLY_HOOK'] = static function (FakeSocket $io) use ($k, $alterSocket): void {
             check('Virtual IO wird vor dem Trennen der alten Verbindung aktiviert', $k->parent === $alterSocket
@@ -355,8 +357,8 @@ try {
     $fremderVirtual = new FakeSocket(202001);
     $fremderVirtual->modul = $virtual;
     $fremderVirtual->status = 104;
-    $k = parentKonto('eureka', $fremderVirtual);
-    $geteilt = parentKonto('eureka', $fremderVirtual);
+    $k = parentKonto('roborock', $fremderVirtual);
+    $geteilt = parentKonto('roborock', $fremderVirtual);
     $k->ApplyChanges();
     $k->VerbindungPruefen();
     check('Vorhandener geteilter inaktiver Virtual IO wird nicht ungefragt aktiviert', $k->parent === $fremderVirtual

@@ -6,6 +6,7 @@ cd -- "$(dirname -- "$0")/../.."
 export ROBOHUB_TEST_OUTER_NETNS="$(readlink /proc/self/ns/net)"
 exec bwrap --unshare-net --dev-bind / / -- bash -euo pipefail -c '
 php tests/structure-test.php
+python3 -B tests/eureka/installation-test.py
 python3 -B tests/eureka/binding-test.py
 php -d disable_functions=curl_init,curl_exec tests/eureka/pause-test.php
 php -d disable_functions=curl_init,curl_exec tests/eureka/dock-test.php

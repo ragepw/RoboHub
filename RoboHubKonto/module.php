@@ -176,7 +176,11 @@ class RoboHubKonto extends IPSModule
             $this->WriteAttributeBoolean('EchtzeitJeVerbunden', true);
         }
         $eltern = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
-        if ($eltern === 0 || IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()
+        if ($this->ReadPropertyString('Hersteller') === 'eureka') {
+            // Eureka nutzt direktes HTTPS, keinen I/O-Transport. Bestehende Parents erhalten;
+            // auch nach Herstellerwechsel keinen alten Migrationstimer weiterlaufen lassen.
+            $this->SetTimerInterval('Verbindung', 0);
+        } elseif ($eltern === 0 || IPS_GetInstance($eltern)['ModuleInfo']['ModuleID'] !== $this->elternModul()
             || ($this->echtzeitArt() !== '' && $this->elternGeteilt($eltern))
             || ($this->echtzeitArt() === 'websocket' && $this->GetBuffer('WsZiel') === '' && $this->ReadAttributeString('Buendel') !== '')) {
             $this->SetTimerInterval('Verbindung', 15000);
@@ -206,7 +210,9 @@ class RoboHubKonto extends IPSModule
             }
             $this->elternBeobachten();
             // Die Konsole beendet zuerst ihre create-Kette; erst danach konfigurieren.
-            if ($this->ReadAttributeInteger('VerbindungsVersuche') < 3) {
+            if ($this->ReadPropertyString('Hersteller') === 'eureka') {
+                $this->SetTimerInterval('Verbindung', 0);
+            } elseif ($this->ReadAttributeInteger('VerbindungsVersuche') < 3) {
                 $this->SetTimerInterval('Verbindung', 15000);
             }
             return;
@@ -1247,6 +1253,12 @@ class RoboHubKonto extends IPSModule
      */
     public function VerbindungPruefen(): void
     {
+        // Auch alte Timer oder direkte Aufrufe dürfen Eureka-Parents weder anlegen noch tauschen.
+        // Die Parent-Vorgabe für ausdrücklich neue Konsoleninstanzen bleibt davon unabhängig.
+        if ($this->ReadPropertyString('Hersteller') === 'eureka') {
+            $this->SetTimerInterval('Verbindung', 0);
+            return;
+        }
         if (IPS_GetKernelRunlevel() !== KR_READY) {
             return;
         }

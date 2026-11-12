@@ -178,6 +178,10 @@ manuelles Attribut-Rollback, Dateisystemverlust oder mehrere Symcon-Server.
 
 ## Spätere Aktualisierung und Funktionstest — jetzt nicht ausführen
 
+Der inzwischen konkret vorbereitete private SSH-/Bundle-Weg für den Pi steht
+in der [lokalen Bereitstellungsanleitung](eureka-lokale-bereitstellung.md).
+Er verwendet den bestehenden Checkout und einen Dienstneustart ohne GitHub.
+
 Der geprüfte Stand enthält die individuelle Gerätebindung und den Freigabeflag
 `true`. Vor einer späteren Übertragung die Eigenschaft `GeraetID` von 22708
 vertraulich gegen die feste Bindung prüfen; keine Kennung in Protokolle übernehmen.

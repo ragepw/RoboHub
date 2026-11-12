@@ -31,6 +31,20 @@ try {
     $ek->Create();
     check('Create erteilt keine B8-Laufzeitfreigabe', $ek->GetBuffer('EurekaB8Laufzeitfreigabe') === '');
     $ek->props['Hersteller'] = 'eureka';
+    $formVorher = [$ek->props, $ek->attrs];
+    $herstellerFelder = [];
+    $sucheHersteller = static function (array $knoten) use (&$sucheHersteller, &$herstellerFelder): void {
+        if (($knoten['name'] ?? '') === 'Hersteller') { $herstellerFelder[] = $knoten; }
+        foreach ($knoten as $wert) {
+            if (is_array($wert)) { $sucheHersteller($wert); }
+        }
+    };
+    $sucheHersteller(json_decode($ek->GetConfigurationForm(), true, 512, JSON_THROW_ON_ERROR));
+    check('Form-JSON enthält genau eine Hersteller-Auswahl mit unverändertem Eureka-Wert',
+        count($herstellerFelder) === 1 && ($herstellerFelder[0]['type'] ?? '') === 'Select'
+        && count(array_filter($herstellerFelder[0]['options'], static fn(array $o): bool =>
+            ($o['value'] ?? '') === 'eureka' && ($o['caption'] ?? '') === 'Eureka (app "Eureka Robot")')) === 1);
+    check('Formularabruf erhält Eigenschaften und Kontoattribute', $formVorher === [$ek->props, $ek->attrs]);
     $auswahl = new ReflectionMethod(RoboHubKonto::class, 'treiber');
     check('Eureka ist registriert und wird als echter Treiber ausgewählt', $auswahl->invoke($ek) instanceof RoboHubEureka
         && str_contains($ek->GetConfigurationForm(), 'Eureka'));
@@ -49,7 +63,7 @@ try {
     check('Eureka speichert Token-Bündel und Sitzungsrevision ohne Passwort', isset($eb['access_token'], $eb['refresh_token'])
         && $ek->ReadAttributeString('BuendelRevision') !== '' && !str_contains(json_encode($eb), 'offline-password'));
     $ek->VerbindungPruefen();
-    $eurekaIo = $ek->parent->InstanceID;
+    check('Eureka benötigt für den HTTPS-Lesebetrieb keinen automatisch angelegten I/O', $ek->parent === null && $ek->timers['Verbindung'] === 0);
     $el = json_decode($ek->GeraeteListe(), true);
     check('Geräteerkennung erhält Modell E20 Evo Plus', ($el['geraete'][0]['modell'] ?? '') === 'E20 Evo Plus');
     $ef = json_decode(konsole($cfg->GetConfigurationForm()), true);
@@ -61,7 +75,7 @@ try {
             }
         }
     }
-    check('Konfigurator erzeugt Eureka-Gerät mit passendem Konto und Virtual IO', ($zeile['create'][0]['configuration']['Modell'] ?? '') === 'E20 Evo Plus'
+    check('Konfigurator bietet explizite Neuanlage mit passendem Konto und Virtual IO an', ($zeile['create'][0]['configuration']['Modell'] ?? '') === 'E20 Evo Plus'
         && ($zeile['create'][1]['configuration']['Hersteller'] ?? '') === 'eureka'
         && ($zeile['create'][2]['moduleID'] ?? '') === '{6179ED6A-FC31-413C-BB8E-1204150CF376}');
     $eg = new RoboHubGeraet(9601);
@@ -232,5 +246,4 @@ try {
 } finally {
     $GLOBALS['robohubTreiberFabrik'] = $eurekaFabrik;
     unset($GLOBALS['INST'][9600], $GLOBALS['INST'][9601]);
-    if (isset($eurekaIo)) { unset($GLOBALS['INST'][$eurekaIo]); }
 }
