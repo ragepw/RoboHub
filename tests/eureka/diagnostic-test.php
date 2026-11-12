@@ -10,6 +10,10 @@ $GLOBALS['boot'] = time() - 100;
 $GLOBALS['ziel'] = ['ConnectionID' => 45174,
     'ModuleInfo' => ['ModuleID' => '{631DA85B-5985-4C25-B222-E47FDD49E302}']];
 $GLOBALS['zielId'] = 'offline-e20';
+if (!defined('ROBOHUB_DIAGNOSE_NUR_FIXTURE')) {
+    function IPS_IsAdministrator() { return $GLOBALS['anzeigeAdmin'] ?? true; }
+    function IPS_GetLoggedInUser() { return $GLOBALS['anzeigeBenutzer'] ?? '@admin'; }
+}
 function IPS_GetKernelRunlevel(): int { return $GLOBALS['runlevel'] ?? KR_READY; }
 function IPS_GetKernelStartTime(): int { return $GLOBALS['boot']; }
 function IPS_InstanceExists(int $id): bool { return $id === 22708 && !($GLOBALS['fehlt'] ?? false); }
@@ -504,6 +508,7 @@ foreach ([['status' => 200, 'response' => '{invalid'], ['status' => 200, 'respon
     };
 }
 require __DIR__ . '/provisioning-cases.php';
+require __DIR__ . '/runtime-display-cases.php';
 
 $fehler = 0;
 foreach ($tests as $name => $fn) {

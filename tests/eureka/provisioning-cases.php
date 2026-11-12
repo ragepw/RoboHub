@@ -13,7 +13,7 @@ function provisionFixture(): array
     $pk = base64_encode(sodium_crypto_sign_publickey($pair));
     $g = ['zweck' => RoboHubEurekaGenehmigung::ZWECK, 'konto' => 45174, 'instanz' => 22708, 'cloudGeraetId' => $GLOBALS['zielId'],
         'modell' => 'E20 Evo Plus', 'befehl' => RoboHubEurekaDiagnose::BEFEHL,
-        'erwartet' => $k->EurekaB8LaufzeitAnzeigen(), 'von' => time(), 'bis' => time() + 300];
+        'erwartet' => $GLOBALS['boot'] . ':' . $k->puffer['EurekaB8Laufzeit'], 'von' => time(), 'bis' => time() + 300];
     $sign = function (array $a) use ($sk): string {
         $roh = json_encode($a, JSON_THROW_ON_ERROR);
         return json_encode(['nutzlast' => base64_encode($roh),

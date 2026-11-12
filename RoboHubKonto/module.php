@@ -521,10 +521,19 @@ class RoboHubKonto extends IPSModule
     /** Lokale Istkennung zur externen Prüfung; keine Genehmigung und kein GET. */
     public function EurekaB8LaufzeitAnzeigen(): string
     {
+        $this->eurekaB8ImportAdministratorPruefen();
         return $this->mitEurekaB8Sperre(function (RoboHubEurekaDiagnose $d): string {
-            $k = $this->eurekaB8Kontext();
-            RoboHubEurekaDiagnose::pruefen($k);
-            return $k['boot'];
+            $this->eurekaB8ImportAdministratorPruefen();
+            $this->eurekaB8GeraetebindungPruefen();
+            $start = IPS_GetKernelStartTime();
+            $kennung = $this->GetBuffer('EurekaB8Laufzeit');
+            if (!is_int($start) || $start <= 0 || $start > time()) {
+                throw new RoboHubFehler('Eureka: Laufzeitbindung fehlt.');
+            }
+            if (!preg_match('/\A[a-f0-9]{64}\z/D', $kennung)) {
+                throw new RoboHubFehler('Eureka: Lokale Laufzeitkennung fehlt oder ist ungültig; Anzeige initialisiert keine Buffer.');
+            }
+            return $start . ':' . $kennung;
         });
     }
 
@@ -539,7 +548,7 @@ class RoboHubKonto extends IPSModule
         });
     }
 
-    /** Nur am Import: fehlende native Prüfbarkeit ist niemals eine Berechtigung. */
+    /** Import und lokale Laufzeitanzeige: native Administratorprüfung, sonst gesperrt. */
     private function eurekaB8ImportAdministratorPruefen(): void
     {
         try {
@@ -669,15 +678,21 @@ class RoboHubKonto extends IPSModule
         return $b;
     }
 
-    private function eurekaB8Kontext(): array
+    /** Lokale Modul-/Kontozuordnung ohne Gerätecache oder Cloud-Zugriff. */
+    private function eurekaB8GeraetebindungPruefen(): void
     {
-        $b = $this->eurekaB8Buendel();
         if (!IPS_InstanceExists(22708)) { throw new RoboHubFehler('Eureka: Diagnosegerät fehlt.'); }
         $instanz = IPS_GetInstance(22708);
         if (($instanz['ModuleInfo']['ModuleID'] ?? null) !== '{631DA85B-5985-4C25-B222-E47FDD49E302}' ||
             ($instanz['ConnectionID'] ?? null) !== $this->InstanceID) {
             throw new RoboHubFehler('Eureka: Diagnosegerät ist nicht eindeutig diesem Konto zugeordnet.');
         }
+    }
+
+    private function eurekaB8Kontext(): array
+    {
+        $b = $this->eurekaB8Buendel();
+        $this->eurekaB8GeraetebindungPruefen();
         $id = IPS_GetProperty(22708, 'GeraetID');
         $liste = json_decode($this->ReadAttributeString('Geraete'), true);
         if (!is_array($liste) || !array_is_list($liste)) { throw new RoboHubFehler('Eureka: Gerätecache fehlt.'); }

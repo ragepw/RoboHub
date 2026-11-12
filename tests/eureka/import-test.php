@@ -107,8 +107,13 @@ if (in_array($importFall, ['admin', 'rollenAdmin'], true)) {
     }
     sicher(!isset($k->puffer['EurekaB8Laufzeitfreigabe']) && $t->calls === []);
     sicher($GLOBALS['locks'] === []);
-    // Normale Diagnosevorprüfung/Anzeige werden nicht pauschal auf Administratoren beschränkt.
-    $k->EurekaB8Vorpruefen(false); $k->EurekaB8LaufzeitAnzeigen();
+    // Vorprüfung bleibt erhalten; Laufzeitanzeige verlangt native Administratorrechte.
+    $k->EurekaB8Vorpruefen(false);
+    if (in_array($importFall, ['adminUngueltigeSignatur', 'adminFalschesZiel', 'ohneVertrauensanker'], true)) {
+        $k->EurekaB8LaufzeitAnzeigen();
+    } else {
+        gesperrt(fn() => $k->EurekaB8LaufzeitAnzeigen());
+    }
 }
 sicher($k->logs === [] && $GLOBALS['locks'] === []);
 echo "OK\n";
