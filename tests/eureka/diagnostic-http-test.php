@@ -170,6 +170,72 @@ $tests['Unerwartete HTTP-Version wird ohne weiteren Transport verworfen'] = func
         sicher($GLOBALS['execCalls'] === 1 && $GLOBALS['closeCalls'] === 1);
     } finally { unset($GLOBALS['httpVersion']); }
 };
+function dockHttpFixture(): array
+{
+    $o = new stdClass();
+    $g = e20Fixture()['geraet']; $g['stand']['zeit'] = $g['verbindungEmpfangen'] = time();
+    $o->k = ['konto'=>45174,'instanz'=>22708,'hersteller'=>'eureka','region'=>'eu',
+        'jetzt'=>time(),'monoton'=>100000,'boot'=>(time()-100).':'.str_repeat('d',64),
+        'revision'=>'offline','warteBis'=>0,'kontoname'=>'offline@example.invalid','cacheZeit'=>time(),
+        'geraet'=>$g,'buendel'=>['region'=>'eu','access_token'=>'e30.'.base64_encode(json_encode(['exp'=>time()+3600])).'.offline']];
+    $o->f = []; $o->l = ['erwartet'=>$o->k['boot'],'zustand'=>'genehmigt','cloudGeraetId'=>$g['id'],
+        'genehmigtBis'=>time()+60,'genehmigtMonotonBis'=>160000];
+    $d = new RoboHubEurekaDock(fn()=>$o->k,fn()=>$o->f,function ($v) use ($o) { $o->f=$v; },
+        fn($fn)=>$fn(),fn()=>$o->l,function ($v) use ($o) { $o->l=$v; });
+    $f = $d->freigeben(60,RoboHubEurekaDock::BESTAETIGUNG)['freigabe'];
+    return [$d,$f,$o];
+}
+foreach ([200,401,429,500,302,307,'timeout'] as $fall) {
+    $tests['Dock im echten gemeinsamen HTTPS-Code ohne Retry: ' . $fall] = function () use ($fall): void {
+        unset($GLOBALS['vorCurl']); $GLOBALS['execCalls']=$GLOBALS['closeCalls']=0; $GLOBALS['httpCalls']=[];
+        [$d,$f,$o] = dockHttpFixture();
+        $GLOBALS['status'] = is_int($fall) ? $fall : 0;
+        $GLOBALS['response'] = $fall === 'timeout' ? false : '{"errorCode":0}';
+        $GLOBALS['vorCurl'] = function () use ($o): void {
+            sicher($o->f['zustand'] === 'verbraucht' && isset($o->f['transportBegonnenAm']) && $o->l['zustand'] === 'geschlossen');
+        };
+        if ($fall === 200) { sicher((new RoboHubEureka())->dockEinmal($d,$f)['angenommen']); }
+        else { gesperrt(fn()=>(new RoboHubEureka())->dockEinmal($d,$f)); }
+        gesperrt(fn()=>(new RoboHubEureka())->dockEinmal($d,$f));
+        sicher($GLOBALS['execCalls'] === 1 && $GLOBALS['closeCalls'] === 1);
+        $c=$GLOBALS['httpCalls'][0]; $v=$c['options'];
+        sicher($c['url'] === 'https://euprod.mzrobo.com/devices/commands/offline-e20');
+        sicher($v[CURLOPT_POSTFIELDS] === '{"data":"AA0DB80000000000000222010016"}' && $v[CURLOPT_CUSTOMREQUEST] === 'POST');
+        sicher($v[CURLOPT_HTTP_VERSION] === CURL_HTTP_VERSION_1_1 && $v[CURLOPT_FRESH_CONNECT] && $v[CURLOPT_FORBID_REUSE]);
+        sicher($v[CURLOPT_HTTPAUTH] === CURLAUTH_NONE && $v[CURLOPT_PROXYAUTH] === CURLAUTH_NONE && $v[CURLOPT_PROXY] === '');
+        sicher(in_array('Expect:',$v[CURLOPT_HTTPHEADER],true) && $v[CURLOPT_FOLLOWLOCATION] === false && $v[CURLOPT_MAXREDIRS] === 0);
+        sicher(!isset($v[CURLOPT_SSL_VERIFYPEER]) && !isset($v[CURLOPT_SSL_VERIFYHOST]));
+        unset($GLOBALS['vorCurl']);
+    };
+}
+foreach (['widerruf','zustand','ablauf','konfiguration'] as $fall) {
+    $tests['Dock letzte Prüfung verhindert I/O: ' . $fall] = function () use ($fall): void {
+        [$d,$f,$o] = dockHttpFixture();
+        $GLOBALS['execCalls']=0; $GLOBALS['httpCalls']=[];
+        $GLOBALS['beiOptionen'] = function () use ($d,$o,$fall): void {
+            if ($fall === 'widerruf') { $d->widerrufen(); }
+            if ($fall === 'zustand') { $o->k['geraet']['stand']['roh']['connected']=false; }
+            if ($fall === 'ablauf') { $o->k['monoton']+=60000; }
+        };
+        if ($fall === 'konfiguration') { $GLOBALS['optionErgebnis']=false; }
+        try {
+            gesperrt(fn()=>(new RoboHubEureka())->dockEinmal($d,$f));
+            gesperrt(fn()=>(new RoboHubEureka())->dockEinmal($d,$f));
+            sicher($GLOBALS['execCalls'] === 0);
+        } finally { unset($GLOBALS['beiOptionen'],$GLOBALS['optionErgebnis']); }
+    };
+}
+$tests['Dock-Flag erlaubt weder Start/Pause noch B8 oder Versand ohne Berechtigung'] = function (): void {
+    $h=new ReflectionMethod(RoboHubEureka::class,'httpAusfuehren'); $GLOBALS['httpCalls']=[];
+    foreach ([RoboHubEurekaDiagnose::BEFEHL,RoboHubEurekaProtokoll::start(2,0,8),RoboHubEurekaProtokoll::pause(),RoboHubEurekaProtokoll::fortsetzen()] as $cmd) {
+        gesperrt(fn()=>$h->invoke(new RoboHubEureka(),'POST','/devices/commands/offline-e20','offline',['data'=>$cmd],fn()=>null,true));
+    }
+    gesperrt(fn()=>$h->invoke(new RoboHubEureka(),'POST','/devices/commands/offline-e20','offline',['data'=>RoboHubEurekaDock::BEFEHL],null,true));
+    gesperrt(fn()=>$h->invoke(new RoboHubEureka(),'POST','/devices/commands/offline-e20','offline',['data'=>RoboHubEurekaDock::BEFEHL],fn()=>null));
+    $t=new ReflectionMethod(RoboHubEureka::class,'transport');
+    gesperrt(fn()=>$t->invoke(new RoboHubEureka(),'POST','/devices/commands/offline-e20','offline',['data'=>RoboHubEurekaDock::BEFEHL]));
+    sicher($GLOBALS['httpCalls'] === []);
+};
 $fehler = 0;
 foreach ($tests as $name => $fn) {
     try { $fn(); echo 'OK: ' . $name . "\n"; }

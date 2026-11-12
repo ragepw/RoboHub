@@ -18,7 +18,7 @@ function IPS_GetKernelRunlevel(): int { return $GLOBALS['runlevel'] ?? KR_READY;
 function IPS_GetKernelStartTime(): int { return $GLOBALS['boot']; }
 function IPS_InstanceExists(int $id): bool { return $id === 22708 && !($GLOBALS['fehlt'] ?? false); }
 function IPS_GetInstance(int $id): array { return $GLOBALS['ziel']; }
-function IPS_GetProperty(int $id, string $name) { return $GLOBALS['zielId']; }
+function IPS_GetProperty(int $id, string $name) { return $name === 'Deaktiviert' ? ($GLOBALS['zielDeaktiviert'] ?? false) : $GLOBALS['zielId']; }
 function IPS_SemaphoreEnter(string $name, int $ms): bool
 {
     if (isset($GLOBALS['locks'][$name]) || ($GLOBALS['lockFehler'] ?? '') === $name) { return false; }
@@ -45,9 +45,9 @@ class IPSModule
     public function ReadAttributeString(string $n): string { return (string)($this->attrs[$n] ?? ''); }
     public function WriteAttributeString(string $n, string $v): void
     {
-        if ($n === 'EurekaB8Diagnose' && $this->speichernSperren) { return; }
+        if (in_array($n, ['EurekaB8Diagnose', 'EurekaDockVersuch'], true) && $this->speichernSperren) { return; }
         $this->attrs[$n] = $v;
-        if ($n === 'EurekaB8Diagnose' && is_callable($this->beiSpeichern)) { ($this->beiSpeichern)(); }
+        if (in_array($n, ['EurekaB8Diagnose', 'EurekaDockVersuch'], true) && is_callable($this->beiSpeichern)) { ($this->beiSpeichern)(); }
     }
     public function ReadAttributeInteger(string $n): int { return (int)($this->attrs[$n] ?? 0); }
     public function WriteAttributeInteger(string $n, int $v): void { $this->attrs[$n] = $v; }
@@ -90,7 +90,7 @@ class DiagnoseHttp extends RoboHubEureka
     public array $calls = [];
     public $antwort = null;
     public $vorTransport = null;
-    protected function httpAusfuehren(string $m, string $p, string $t, ?array $b, ?callable $diagnosePruefung = null): array
+    protected function httpAusfuehren(string $m, string $p, string $t, ?array $b, ?callable $diagnosePruefung = null, bool $dock = false): array
     {
         if (is_callable($this->vorTransport)) { ($this->vorTransport)(); }
         if ($diagnosePruefung !== null) { $diagnosePruefung(true); }
@@ -508,7 +508,7 @@ foreach ([['status' => 200, 'response' => '{invalid'], ['status' => 200, 'respon
     };
 }
 require __DIR__ . '/b8-response-cases.php';
-require __DIR__ . '/provisioning-cases.php';
+if (!defined('ROBOHUB_TEST_OHNE_SIGNATUREN')) { require __DIR__ . '/provisioning-cases.php'; }
 require __DIR__ . '/runtime-display-cases.php';
 
 $fehler = 0;

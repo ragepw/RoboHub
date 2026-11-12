@@ -393,3 +393,12 @@ ungültige Zeiten). `.tools/test-eureka.inc.php` prüft die zwei neuen Variablen
 Abruffehler, unverändertes GetActivity und die Herstellerisolation im echten
 Konto-/Gerätepfad mit ersetztem Transport. Bedeutung und Grenzen:
 [Statusdokumentation](../../docs/eureka-zustaende.md#erreichbarkeit-gerätebindung-und-alter).
+
+
+## Separater Dock-Einmalpfad (12.11.2026)
+
+Implementierung, native API, Genehmigungsschema, Prüfgrenzen und Voraussetzungen:
+[Dock-Einmaltest](../../docs/eureka-dock-einmaltest.md).
+`bash tests/eureka/run-dock-offline.sh` erzwingt Netzisolierung und deaktiviert
+Signaturgeneratoren; signaturerzeugende Provisionierungs-/Importtests werden in
+diesem Runner ausgelassen. Die normalen Steuerbefehle bleiben gesperrt.

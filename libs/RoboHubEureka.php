@@ -5,6 +5,7 @@ require_once __DIR__ . '/RoboHubModell.php';
 require_once __DIR__ . '/RoboHubEurekaBefehlsweg.php';
 require_once __DIR__ . '/RoboHubEurekaZustand.php';
 require_once __DIR__ . '/RoboHubEurekaDiagnose.php';
+require_once __DIR__ . '/RoboHubEurekaDock.php';
 
 /**
  * Eureka / MZ-Robo Cloud
@@ -49,13 +50,13 @@ class RoboHubEureka implements RoboHubTreiber
         return $this->httpAusfuehren($method, $path, $token, $body);
     }
 
-    /** Gemeinsame HTTPS-Implementierung für GETs und die gesonderte Einmaldiagnose. */
-    protected function httpAusfuehren(string $method, string $path, string $token, ?array $body, ?callable $diagnosePruefung = null): array
+    /** Gemeinsame HTTPS-Implementierung für GETs und separate B8-/Dock-Einmalpfade. */
+    protected function httpAusfuehren(string $method, string $path, string $token, ?array $body, ?callable $diagnosePruefung = null, bool $dock = false): array
     {
         // Auch die gemeinsame unterste Transportgrenze bleibt für Normalbefehle zu.
         if (str_starts_with($path, '/devices/commands')) {
             if ($method !== 'POST' || !preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
-                $body !== ['data' => RoboHubEurekaDiagnose::BEFEHL] || $token === '' || $diagnosePruefung === null) {
+                $body !== ['data' => ($dock ? RoboHubEurekaDock::BEFEHL : RoboHubEurekaDiagnose::BEFEHL)] || $token === '' || $diagnosePruefung === null) {
                 throw new RoboHubFehler('Eureka: Befehls-Transport ohne Diagnoseberechtigung gesperrt.');
             }
             $diagnosePruefung();
@@ -156,6 +157,20 @@ class RoboHubEureka implements RoboHubTreiber
                 // gültige Freigabe UND bereits persistierten Verbrauch.
                 $pruefen();
                 return $this->httpAusfuehren('POST', $path, $token, $body, $pruefen);
+            });
+    }
+
+    /** Separater Dock-Pfad, keine normale Befehlsfreigabe und kein Refresh/Retry. */
+    final public function dockEinmal(RoboHubEurekaDock $dock, string $freigabe): array
+    {
+        return $dock->ausfuehren($freigabe,
+            function (string $path, string $token, array $body, callable $pruefen): array {
+                if (!preg_match('~\A/devices/commands/[A-Za-z0-9_-]{1,128}\z~D', $path) ||
+                    $body !== ['data' => RoboHubEurekaDock::BEFEHL] || $token === '') {
+                    throw new RoboHubFehler('Eureka: Dock-Transportparameter gesperrt.');
+                }
+                $pruefen();
+                return $this->httpAusfuehren('POST', $path, $token, $body, $pruefen, true);
             });
     }
 

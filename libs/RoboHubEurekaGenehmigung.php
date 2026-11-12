@@ -8,6 +8,18 @@ final class RoboHubEurekaGenehmigung
 
     public static function pruefen(string $dokument, string $publicKey, string $boot, int $jetzt): array
     {
+        return self::dokumentPruefen($dokument, $publicKey, $boot, $jetzt, self::ZWECK, RoboHubEurekaDiagnose::BEFEHL, 300);
+    }
+
+    public static function dockPruefen(string $dokument, string $publicKey, string $boot, int $jetzt): array
+    {
+        return self::dokumentPruefen($dokument, $publicKey, $boot, $jetzt,
+            'robohub/eureka/dock/runtime/v1', RoboHubEurekaDock::BEFEHL, 60);
+    }
+
+    private static function dokumentPruefen(string $dokument, string $publicKey, string $boot, int $jetzt,
+        string $zweck, string $befehl, int $maxDauer): array
+    {
         try {
             if (strlen($dokument) > 4096 || !function_exists('sodium_crypto_sign_verify_detached')) {
                 throw new RuntimeException();
@@ -21,13 +33,13 @@ final class RoboHubEurekaGenehmigung
                 !sodium_crypto_sign_verify_detached($sig, $roh, $pk)) { throw new RuntimeException(); }
             $g = json_decode($roh, true, 8, JSON_THROW_ON_ERROR);
             if (!is_array($g) || array_keys($g) !== ['zweck', 'konto', 'instanz', 'cloudGeraetId', 'modell', 'befehl', 'erwartet', 'von', 'bis'] ||
-                $g['zweck'] !== self::ZWECK || $g['konto'] !== 45174 || $g['instanz'] !== 22708 ||
+                $g['zweck'] !== $zweck || $g['konto'] !== 45174 || $g['instanz'] !== 22708 ||
                 !is_string($g['cloudGeraetId']) || $g['cloudGeraetId'] === '' || strlen($g['cloudGeraetId']) > 256 ||
                 trim($g['cloudGeraetId']) !== $g['cloudGeraetId'] || preg_match('/[\x00-\x1f\x7f]/', $g['cloudGeraetId']) ||
-                $g['modell'] !== 'E20 Evo Plus' || $g['befehl'] !== RoboHubEurekaDiagnose::BEFEHL ||
+                $g['modell'] !== 'E20 Evo Plus' || $g['befehl'] !== $befehl ||
                 !is_string($g['erwartet']) || !preg_match('/\A[1-9][0-9]*:[a-f0-9]{64}\z/D', $g['erwartet']) ||
                 !hash_equals($boot, $g['erwartet']) || !is_int($g['von']) || !is_int($g['bis']) ||
-                $g['bis'] <= $g['von'] || $g['bis'] - $g['von'] > 300 ||
+                $g['bis'] <= $g['von'] || $g['bis'] - $g['von'] > $maxDauer ||
                 $jetzt < $g['von'] || $jetzt >= $g['bis']) { throw new RuntimeException(); }
             return $g;
         } catch (Throwable $e) {
@@ -38,14 +50,23 @@ final class RoboHubEurekaGenehmigung
     /** Fester externer Vertrauensanker; kein Property, Request-Parameter oder Umgebungswert. */
     public static function vertrauensanker(): string
     {
+        return self::ankerLesen('/etc/robohub/eureka-b8.pub');
+    }
+
+    public static function dockVertrauensanker(): string
+    {
+        return self::ankerLesen('/etc/robohub/eureka-dock.pub');
+    }
+
+    private static function ankerLesen(string $pfad): string
+    {
         // Ohne POSIX bleibt die Prozessidentität unbewiesen, niemals als Root ableiten.
         $euid = function_exists('posix_geteuid') ? posix_geteuid() : null;
-        // Ausschließlich dieser feste B8-Import (am Moduleinstieg nativ administrativ
+        // Ausschließlich die festen B8-/Dock-Importe (am Moduleinstieg nativ administrativ
         // geprüft) toleriert Root oder unbekannte EUID beim Schreibzugriffs-Veto.
         // lstat prüft Eigentümer/Modus/Typ nativ ohne POSIX. Root kann auch diese
         // geschützten Pfade, Modulcode und Laufzeitdaten manipulieren.
         $schreibzugriffPruefen = $euid !== null && $euid !== 0;
-        $pfad = '/etc/robohub/eureka-b8.pub';
         foreach (['/etc', '/etc/robohub', $pfad] as $p) {
             clearstatcache(true, $p);
             $s = @lstat($p);
