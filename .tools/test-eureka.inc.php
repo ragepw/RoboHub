@@ -108,7 +108,7 @@ try {
         $text = $eg->$methode();
         $eg->RequestAction('Befehl', $aktion);
         check('Native Eureka-Aktion bleibt ohne Transport und Zustandsänderung: ' . $methode,
-            str_contains($text, 'Steuerbefehle noch nicht freigegeben')
+            str_contains($text, 'Ausschließlich manuelle Bedienung freigegeben')
             && count($et->pfade) === $vorBefehl && $ek->ReadAttributeString('Schnappschuss') === $vorStand
             && variable(9601, 'Zustand')['value'] === $vorZustand && variable(9601, 'Akku')['value'] === $vorAkku
             && $eg->timers['Abruf'] === 30000);

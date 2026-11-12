@@ -10,7 +10,7 @@ require_once __DIR__ . '/RoboHubEurekaPauseTest.php';
 
 /**
  * Eureka / MZ-Robo Cloud
- * Anmeldung, Geräte und Status. Befehlsweg vorbereitet, Produktivversand gesperrt.
+ * Anmeldung, Geräte, Status und individuell gebundene E20-Bedienung.
  */
 class RoboHubEureka implements RoboHubTreiber
 {
@@ -38,10 +38,26 @@ class RoboHubEureka implements RoboHubTreiber
     private const CLIENT_ID = '1301';
     private const APP_VERSION = '1.2.1.26101001';
     // Nur nach gesonderter Freigabe und Review im Quellcode änderbar.
-    private const BEFEHLE_FREIGEGEBEN = false;
-    // Keine bestätigte E20-Befehlsfreigabe vorhanden. Keine Modell-Heuristik.
-    private const BEFEHLS_ZUORDNUNGEN = [];
-    private const BEFEHLS_GERAET_ID = '';
+    private const BEFEHLE_FREIGEGEBEN = true;
+    // Liveprofil laut Gerätecache; Herstellerbytes: Plugin 2.5.4.
+    // Nur dieses vollständige Profil, niemals eine Modell-Heuristik.
+    private const BEFEHLS_ZUORDNUNGEN = [[
+        'identifikation' => [
+            'productModel' => 'E20 Evo Plus', 'sn8' => '750Y0015',
+            'protoVersion' => 0, 'platform' => 'robozone',
+            'plugin' => ['name' => 'T0xB8_750Y0015.zip', 'versionName' => '2.5.4'],
+        ],
+        'familie' => RoboHubEurekaProtokoll::FAMILIE,
+        'beleg' => 'docs/eureka-regulaere-steuerung.md: Liveprofil und Herstellerbelege 2.5.4',
+    ]];
+    private const BEFEHLS_GERAET_ID = '2115890368241139713';
+
+    /** Nur feste individuelle Bindung; Modell und Kontext werden unter Sperre geprüft. */
+    public static function regulaereBedienungFuer(string $id): bool
+    {
+        return self::BEFEHLE_FREIGEGEBEN && self::BEFEHLS_GERAET_ID !== '' &&
+            hash_equals(self::BEFEHLS_GERAET_ID, $id);
+    }
 
     protected function transport(
         string $method,
@@ -488,7 +504,10 @@ class RoboHubEureka implements RoboHubTreiber
         array $parameter
     ): string {
         $pause = $this->pauseTest;
-        $test = $pause !== null && $this->manuelleBedienung && $befehl === 'pause' && $parameter === [];
+        // Alte Einmalverbräuche bleiben gespeichert. Die separat freigegebene
+        // reguläre Bedienung besitzt ihren eigenen, weiterhin gültigen Verbrauch.
+        $regulaer = self::regulaereBedienungFuer((string)($geraet['id'] ?? ''));
+        $test = !$regulaer && $pause !== null && $this->manuelleBedienung && $befehl === 'pause' && $parameter === [];
         $zuordnungen = self::BEFEHLS_ZUORDNUNGEN;
         if ($test) {
             $k = $pause->pruefen();
@@ -498,6 +517,9 @@ class RoboHubEureka implements RoboHubTreiber
             $zuordnungen = RoboHubEurekaPauseTest::zuordnungen($k);
         } elseif (!self::BEFEHLE_FREIGEGEBEN) {
             throw new RoboHubFehler('Eureka: Steuerbefehle noch nicht freigegeben.');
+        }
+        if (!$test && !$this->manuelleBedienung) {
+            throw new RoboHubFehler('Eureka: Ausschließlich manuelle Bedienung freigegeben.');
         }
         if (!$test && (self::BEFEHLS_GERAET_ID === '' || ($geraet['id'] ?? null) !== self::BEFEHLS_GERAET_ID)) {
             throw new RoboHubFehler('Eureka: Separat bestätigte Befehlsgerätebindung fehlt.');

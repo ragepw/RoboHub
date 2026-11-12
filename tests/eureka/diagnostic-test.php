@@ -464,8 +464,7 @@ $tests['Monotone Frist verhindert Verlängerung durch zurückgestellte Systemuhr
 };
 $tests['Normalbefehle und Transport bleiben auch mit Diagnosefreigabe gesperrt'] = function (): void {
     [$k, $t] = konto(); frei($k);
-    $rc = new ReflectionClass(RoboHubEureka::class);
-    sicher($rc->getConstant('BEFEHLE_FREIGEGEBEN') === false && $rc->getConstant('BEFEHLS_ZUORDNUNGEN') === []);
+    sicher(!RoboHubEureka::regulaereBedienungFuer('offline-e20'));
     foreach (['start', 'pause', 'station', 'stopp', 'orten', 'raum', 'saugstufe', 'wasserstufe'] as $b) {
         gesperrt(fn() => $t->befehl([], [], $b, []));
     }

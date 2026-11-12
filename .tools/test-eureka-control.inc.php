@@ -29,6 +29,7 @@ class ControlKonto extends RoboHubKonto
         $this->offline->befehlsKontext = $echt->befehlsKontext;
         $this->offline->befehlsVersuch = $echt->befehlsVersuch;
         $this->offline->beiUnauthorized = $echt->beiUnauthorized;
+        $this->offline->pauseTest = $echt->pauseTest;
         return $this->offline;
     }
     public function ForwardData($json)
@@ -84,6 +85,88 @@ try {
         $l = json_decode($ck->ReadAttributeString('Geraete'), true); $aendern($l[0]);
         $ck->WriteAttributeString('Geraete', json_encode($l));
     };
+    check('Offlineadapter verwendet das echte einzelne E20-Profil',
+        (new ReflectionClass(OfflineFreigegebenEureka::class))->getConstant('BEFEHLS_ZUORDNUNGEN') ===
+        (new ReflectionClass(RoboHubEureka::class))->getConstant('BEFEHLS_ZUORDNUNGEN'));
+    foreach (['geschlossen', 'widerrufen', 'verbraucht'] as $zustand) {
+        $reset();
+        $historisch = json_encode(['zustand' => $zustand, 'cloudGeraetId' => 'offline-e20']);
+        $ck->WriteAttributeString('EurekaPauseTest', $historisch);
+        $ck->SetBuffer('EurekaPauseTest', $historisch);
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_PAUSE);
+        check('Regulärer Versuch lässt alten Pause-Testverbrauch unverändert: ' . $zustand,
+            count($ct->posts) === 1 && $ck->ReadAttributeString('EurekaPauseTest') === $historisch
+            && $ck->GetBuffer('EurekaPauseTest') === $historisch);
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_PAUSE);
+        check('Regulärer Verbrauch bleibt trotz historischem Test erhalten: ' . $zustand, count($ct->posts) === 1);
+    }
+    $ck->WriteAttributeString('EurekaPauseTest', '{}'); $ck->SetBuffer('EurekaPauseTest', '');
+
+    // Zusammenhängende Bedienung ohne Zurücksetzen von Sitzungs-/Versuchsverbrauch.
+    $reset('stop');
+    $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+    foreach ([['stop', 1, RoboHubEurekaProtokoll::start(2, 0, 8)],
+        ['cleaning', 2, RoboHubEurekaProtokoll::pause()],
+        ['pause', 1, RoboHubEurekaProtokoll::fortsetzen()],
+        ['cleaning', 4, RoboHubEurekaProtokoll::station()]] as $schritt => [$state, $action, $hex]) {
+        $shadowAendern(function (&$s) use ($state, $schritt): void {
+            $s['roh']['state'] = $s['roh']['parentState'] = $state;
+            // Auch bei gleichem Empfangssekundenwert ist dies ein neuer gelesener Stand.
+            $s['roh']['batteryLevel'] = 87 - $schritt;
+        });
+        if ($schritt > 0) {
+            $cg->props['EurekaStartSaugstufe'] = -1; $cg->props['EurekaStartWasserstufe'] = -1;
+        }
+        $vorher = $ck->ReadAttributeString('Schnappschuss');
+        $cg->RequestAction('Befehl', $action);
+        check('Vollständige Bedienfolge, Schritt ' . ($schritt + 1),
+            count($ct->posts) === $schritt + 1 && $ct->posts[$schritt][2] === ['data' => $hex]
+            && $ck->ReadAttributeString('Schnappschuss') === $vorher);
+        $cg->RequestAction('Befehl', $action);
+        check('Bedienfolge wiederholt Schritt nicht: ' . ($schritt + 1), count($ct->posts) === $schritt + 1);
+    }
+    foreach (['stop', 'charging', 'charging_finish'] as $state) {
+        foreach ([1, 2, 3] as $fan) {
+            foreach ([0, 1, 2, 3] as $water) {
+                $reset($state);
+                $cg->props['EurekaStartSaugstufe'] = $fan; $cg->props['EurekaStartWasserstufe'] = $water;
+                $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+                check('Explizite Startauswahl ' . $state . '/' . $fan . '/' . $water,
+                    count($ct->posts) === 1 && $ct->posts[0][2] === ['data' => RoboHubEurekaProtokoll::start($fan, $water, 8)]);
+            }
+        }
+    }
+    foreach (['stop', 'charging', 'charging_finish', 'cleaning', 'pause', 'charging_pause', 'wiping_pause',
+        'sleep', 'charging_back', 'wiping_back', 'collecting_dust', 'upgrading', 'error', 'unknown'] as $state) {
+        foreach ([1, 2, 4] as $action) {
+            $reset($state);
+            $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+            $cg->RequestAction('Befehl', $action);
+            $erlaubt = match ($action) {
+                1 => in_array($state, ['stop', 'charging', 'charging_finish', 'pause'], true),
+                2 => $state === 'cleaning',
+                4 => in_array($state, ['stop', 'pause', 'cleaning'], true),
+            };
+            check('Native Zustandsgrenze ' . $state . '/' . $action, count($ct->posts) === ($erlaubt ? 1 : 0));
+        }
+    }
+    foreach ([['cleaning', 2], ['pause', 1], ['stop', 4], ['pause', 4], ['cleaning', 4]] as [$state, $action]) {
+        $reset($state);
+        $shadowAendern(function (&$s): void { unset($s['roh']['batteryLevel']); });
+        $cg->props['EurekaStartSaugstufe'] = 999; $cg->props['EurekaStartWasserstufe'] = 999;
+        $cg->RequestAction('Befehl', $action);
+        check('Keine Startparameter-/Akkusperre für ' . $state . '/' . $action, count($ct->posts) === 1);
+    }
+    foreach (['EurekaStartSaugstufe', 'EurekaStartWasserstufe'] as $eigenschaft) {
+        $reset('stop');
+        $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+        $ct->vorTransport = function () use ($cg, $eigenschaft): void { $cg->props[$eigenschaft] = 3; };
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+        check('Geänderte Startauswahl vor I/O sperrt: ' . $eigenschaft, $ct->posts === []);
+        $ct->vorTransport = null;
+        $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
+        check('Geänderte Auswahl setzt Verbrauch nicht zurück: ' . $eigenschaft, $ct->posts === []);
+    }
     foreach ([['stop', RoboHubModell::BEFEHL_START, 'AA15B800000000000002220200020008020000000001'],
         ['cleaning', RoboHubModell::BEFEHL_PAUSE, 'AA0DB800000000000002221B00FC'], ['pause', RoboHubModell::BEFEHL_START, 'AA0DB800000000000002221C00FB'],
         ['cleaning', RoboHubModell::BEFEHL_STATION, 'AA0DB80000000000000222010016']] as [$state, $action, $hex]) {
@@ -172,7 +255,7 @@ try {
     $reset();
     $shadowAendern(function (&$s) { $s['roh']['connected'] = true; $s['online'] = true; });
     $cg->Anhalten();
-    check('Automatischer Einstieg bleibt bei explizitem Shadow-Nachweis vorbereitet', count($ct->posts) === 1);
+    check('Automatischer Einstieg bleibt auch bei explizitem Shadow-Nachweis gesperrt', $ct->posts === []);
     $reset('pause'); $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
     $verbrauch = $ck->ReadAttributeString('EurekaBefehlsversuch');
     $cg->SetValue('Befehl', RoboHubModell::BEFEHL_START); $ck->SetBuffer('EurekaSteuerLaufzeit', '');

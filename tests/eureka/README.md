@@ -1,4 +1,15 @@
-# Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
+# Eureka E20 Evo Plus: Offline-Prüfung und manueller Funktionstest
+
+## Aktuelle lokale Freigabe (12.11.2026)
+
+`BEFEHLE_FREIGEGEBEN=true` gilt ausschließlich für die feste individuelle Bindung
+und manuelle Start-/Pause-/Fortsetzen-/Dock-Bedienung. Automatische Einstiege
+bleiben auch bei positivem Shadow-`connected` gesperrt; die bestehende native
+Gegenprobe prüft dies. Vollständiger Prüfstand:
+`bash tests/eureka/run-control-offline.sh`.
+Aktualisierungsweg, Schutz der lokalen Kennung und Funktionstest:
+[Reguläre Steuerung](../../docs/eureka-regulaere-steuerung.md).
+Die folgenden Abschnitte enthalten auch historische Freigabe- und Prüfstände.
 
 ## Reguläre Steuerung nach Docknachweis (12.11.2026)
 
@@ -453,3 +464,18 @@ Kontointegration und den Einmalverbrauch; der gemeinsame HTTPS-Prüfstand ergän
 die bestehende Variable 22284 im echten Gerätemodul mit unverändert gesperrtem
 Produktivtreiber und Transportdouble. Implementierung, Prüfzahlen und verbleibende
 Voraussetzungen: [Pause-Einmaltest](../../docs/eureka-pause-einmaltest.md).
+
+## Reguläre manuelle Bedienung (12.11.2026, ab 517d682)
+
+`bash tests/eureka/run-control-offline.sh` bündelt sämtliche Offlineprüfstände,
+einschließlich B8-/Dock-/Pause-Einmalpfaden, Import- und Kryptografieregression,
+echtem gemeinsamen HTTPS-Code mit cURL-Doubles sowie nativen Konto-/Gerätetests.
+Externe Verbindungen sind durch einen eigenen Netzwerk-Namensraum ausgeschlossen.
+Die normalen Positivtests verwenden das echte E20-Profil und die erfundene
+Kennung `offline-e20`; sie geben kein reales Gerät frei.
+
+Der native Prüfstand ergänzt die vollständige Bedienfolge, alle 36 zulässigen
+Startkonfigurationen aus den drei Ruhezuständen, 42 Zustands-/Aktionsgrenzen,
+fehlende Startwerte bei Pause/Fortsetzen/Dock, Auswahländerung vor I/O und
+historischen Pause-Testverbrauch. Aktueller Freigabestand und konkreter späterer
+Aktualisierungs-/Funktionstest: [Reguläre Steuerung](../../docs/eureka-regulaere-steuerung.md).

@@ -177,6 +177,7 @@ final class RoboHubEurekaBefehlsweg
             throw new RoboHubFehler('Eureka: Gerät belegt oder Synchronisierung nicht verfügbar; kein Versand.');
         }
         try {
+            $startAusEigenschaften = false;
             if (is_callable($this->kontextLesen)) {
                 $kontext = ($this->kontextLesen)($id, $buendel);
                 $geraet = $kontext['geraet'];
@@ -184,19 +185,20 @@ final class RoboHubEurekaBefehlsweg
                 $jetzt = $kontext['jetzt'];
                 if ($befehl === 'start' && $parameter === [] && ($geraet['stand']['roh']['state'] ?? null) !== 'pause') {
                     $parameter = $kontext['startparameter'] ?? [];
+                    $startAusEigenschaften = true;
                 }
             }
             if (($geraet['id'] ?? null) !== $id) {
                 throw new RoboHubFehler('Eureka: Gerätebindung geändert; kein Versand.');
             }
             // Sämtliche Berechtigungs- und Zustandsprüfungen INNERHALB der Sperre.
-            return $this->ausfuehrenGesperrt($buendel, $geraet, $befehl, $parameter, $jetzt);
+            return $this->ausfuehrenGesperrt($buendel, $geraet, $befehl, $parameter, $jetzt, $startAusEigenschaften);
         } finally {
             IPS_SemaphoreLeave($sem);
         }
     }
 
-    private function ausfuehrenGesperrt(array $buendel, array $geraet, string $befehl, array $parameter, int $jetzt): array
+    private function ausfuehrenGesperrt(array $buendel, array $geraet, string $befehl, array $parameter, int $jetzt, bool $startAusEigenschaften): array
     {
         if ($this->verbraucht) {
             throw new RoboHubFehler('Eureka: Befehlsversuch bereits verbraucht; kein doppelter Versand.');
@@ -212,11 +214,14 @@ final class RoboHubEurekaBefehlsweg
             ($this->versuch)($geraet, $buendel, true);
         }
         // Derselbe lokale Kontext wird nach der HTTP-Vorbereitung nochmals geprüft.
-        $pruefen = function (bool $transportBeginnt = false) use ($geraet, $buendel, $befehl, $parameter, $jetzt, $plan): void {
+        $pruefen = function (bool $transportBeginnt = false) use ($geraet, $buendel, $befehl, $parameter, $jetzt, $plan, $startAusEigenschaften): void {
             $g = $geraet; $b = $buendel; $zeit = $jetzt;
             if (is_callable($this->kontextLesen)) {
                 $k = ($this->kontextLesen)($geraet['id'], $buendel);
                 $g = $k['geraet']; $b = $k['buendel']; $zeit = $k['jetzt'];
+                if ($startAusEigenschaften && ($k['startparameter'] ?? []) !== $parameter) {
+                    throw new RoboHubFehler('Eureka: Startauswahl geändert; kein Versand.');
+                }
             }
             if ($g !== $geraet || $b !== $buendel ||
                 self::vorbereiten($g, $befehl, $parameter, $this->zuordnungen, $zeit, $this->manuell) !== $plan) {

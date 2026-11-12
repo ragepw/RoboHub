@@ -1062,6 +1062,7 @@ class RoboHubKonto extends IPSModule
         // Letzter vollständiger Rohstand (z. B. für die Mopp-Anhebungs-Erkennung bei Raum-Einstellungen).
         $geraet['stand'] = (array)((json_decode((string)$this->ReadAttributeString('Schnappschuss'), true) ?: [])[(string)$geraet['id']]['p'] ?? []);
         $pauseTest = $aktion === 'befehl' && $this->ReadPropertyString('Hersteller') === 'eureka' &&
+            !RoboHubEureka::regulaereBedienungFuer((string)$geraet['id']) &&
             ($this->ReadAttributeString('EurekaPauseTest') !== '{}' || $this->GetBuffer('EurekaPauseTest') !== '');
         // Ein aktiver/verbrauchter Test erneuert niemals automatisch seine Sitzung.
         $buendel = $pauseTest ? (json_decode($this->ReadAttributeString('Buendel'), true) ?: []) : $this->gueltigesBuendel();
@@ -1850,9 +1851,12 @@ class RoboHubKonto extends IPSModule
             ($g['stand']['statusquelle']['quelle'] ?? null) !== 'shadow-get') {
             throw new RoboHubFehler('Eureka: Shadow aus aktueller Sitzung und Modullaufzeit erforderlich.');
         }
-        return ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt,
-            'startparameter' => ['fan' => IPS_GetProperty(22708, 'EurekaStartSaugstufe'),
-                'water' => IPS_GetProperty(22708, 'EurekaStartWasserstufe'), 'mode' => 8]];
+        $kontext = ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt];
+        if (in_array($roh['state'] ?? null, ['stop', 'charging', 'charging_finish'], true)) {
+            $kontext['startparameter'] = ['fan' => IPS_GetProperty(22708, 'EurekaStartSaugstufe'),
+                'water' => IPS_GetProperty(22708, 'EurekaStartWasserstufe'), 'mode' => 8];
+        }
+        return $kontext;
     }
 
     private function treiberNeu(): RoboHubTreiber

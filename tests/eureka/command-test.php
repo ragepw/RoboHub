@@ -102,7 +102,7 @@ $tests['E20-Modell allein bestätigt keine Protokollfamilie'] = static function 
     commandAssert($ident['sn8'] === null && $ident['protoVersion'] === null && $ident['platform'] === null && $ident['plugin'] === null);
     commandError(fn() => RoboHubEurekaProtokoll::pruefeZuordnung($d, commandMappings()));
 };
-$tests['E20: live bestätigte SN8 und B8-Familie und ohne Gerätefreigabe'] = static function (): void {
+$tests['E20: bestätigtes Profil ist keine Freigabe für ein anderes individuelles Gerät'] = static function (): void {
     $fixture = e20Fixture(); $d = $fixture['geraet'];
     $ident = RoboHubEurekaProtokoll::identifikation($d);
     commandAssert($ident['productModel'] === 'E20 Evo Plus' && $ident['sn8'] === '750Y0015'
@@ -122,7 +122,10 @@ $tests['E20: live bestätigte SN8 und B8-Familie und ohne Gerätefreigabe'] = st
     }
     commandAssert($t->calls === 0);
     $rc = new ReflectionClass(RoboHubEureka::class);
-    commandAssert($rc->getConstant('BEFEHLE_FREIGEGEBEN') === false && $rc->getConstant('BEFEHLS_ZUORDNUNGEN') === []);
+    $m = $rc->getConstant('BEFEHLS_ZUORDNUNGEN');
+    commandAssert(count($m) === 1 && $m[0]['identifikation'] === $ident);
+    RoboHubEurekaProtokoll::pruefeZuordnung($d, $m);
+    commandAssert($rc->getConstant('BEFEHLS_GERAET_ID') !== $d['id']);
 };
 foreach ([null, 1, '0'] as $version) {
     $tests['E20: fehlende oder unbekannte Familienversion ' . var_export($version, true)] = static function () use ($version): void {

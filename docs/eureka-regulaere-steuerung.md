@@ -1,19 +1,31 @@
-# E20 Evo Plus: Vorbereitung der regulären IP-Symcon-Bedienung
+# E20 Evo Plus: reguläre manuelle IP-Symcon-Bedienung
 
 Stand 12.11.2026, Branch `feature/eureka-e20-evo-plus`. Ausschließlich lokal
 entwickelt und mit Transportdoubles geprüft. Keine Cloudaufrufe, produktiven
-Objektänderungen, Befehle, Aktivierung, Bereitstellung, Commits oder Pushs.
+Objektänderungen, Roboterbefehle, Bereitstellung oder Pushs.
+Die Quellcodefreigabe und der Commit erfolgen ausschließlich lokal.
 Dieses Dokument ersetzt für den normalen Steuerungsweg die älteren Aussagen
 in [Produktivvorbereitung](eureka-produktivvorbereitung.md) und
 [Steuerungsbericht](eureka-steuerung.md). Die separaten B8-/Dock-Genehmigungen
 werden weder ersetzt noch erweitert.
 
-## Ergänzung: eng begrenzter Pause-Einmaltest
+## Lokaler Fertigstellungsstand ab 517d682
 
-Die lokale Vorbereitung eines beaufsichtigten Pause-Tests steht in
-[Pause-Einmaltest](eureka-pause-einmaltest.md). Sie nutzt den hier beschriebenen
-regulären Befehlsweg mit unveränderten globalen Produktivsperren und unverändertem
-B8-/Dock-Einmalpfad. Sie wurde weder bereitgestellt noch aktiviert.
+Das genaue E20-Profil ist im regulären Treiber hinterlegt. Die bestehende
+Bedienung über Konto 45174, Gerät 22708 und Befehlsvariable 22284 ist mit
+Transportdoubles für Start, Pause, Fortsetzen und Dock geprüft.
+Die individuelle Cloud-Gerätekennung ist fest im lokalen Treiber gebunden.
+Laut Betreiber wurde sie erfolgreich gegen die beiden historischen Dock- und
+Gerätebefunde abgeglichen und eingetragen. Dieser Auftrag prüft die vorhandene
+Bindung und das Profil statisch; er wiederholt keinen historischen Liveversuch.
+`BEFEHLE_FREIGEGEBEN=true` erlaubt ausschließlich Start, Pause, Fortsetzen und
+Dock über den manuellen Bedienweg der exakt gebundenen Instanz.
+Stopp, Orten, andere Geräte und automatische Einstiege bleiben gesperrt.
+
+Die separate [Pause-Einmalprüfung](eureka-pause-einmaltest.md), B8 und Dock
+behalten ihre Berechtigungen, Verbräuche, Fristen und Widerrufsprüfungen.
+Die [vertrauliche lokale Eingabe](eureka-vertrauliche-geraetebindung.md) dokumentiert
+den vorausgegangenen Abgleich. Bereitstellung und Live-Funktionstest bleiben offen.
 
 ## Bestätigter Befund und Transport
 
@@ -22,7 +34,10 @@ meldete `angenommen=true`, `ausgefuehrt=false`, `antwortVorhanden=false`.
 Vor Ort endete die Reinigung; der Roboter fuhr zur Station und entleerte sich.
 Das ist der praktische Nachweis für den Dock-Transport, keine neue lokale Messung.
 Die Entleerung war ein beobachteter Folgeablauf und ist kein zusätzlicher
-Absaugbefehl. Start, Pause und Continue sind noch nicht real erprobt.
+Absaugbefehl. Der aktuelle Nutzerbericht bestätigt außerdem Pause über
+`RequestAction(22284, 2)` am realen Gerät und den gemeinsamen HTTPS-Transport.
+Start und Fortsetzen sind herstellerbelegt und offline geprüft; ihr realer
+Funktionstest bleibt ausstehend. Hier wurde kein Liveversuch wiederholt.
 
 Normaler Weg und Dock verwenden dieselbe Methode
 `RoboHubEureka::httpAusfuehren`: EU-Host `https://euprod.mzrobo.com`,
@@ -76,8 +91,11 @@ die bewusste Auswahl: `EurekaStartSaugstufe` und `EurekaStartWasserstufe`, beide
 anfangs -1 = nicht gewählt. Das Formular zeigt die Auswahl beim E20 Evo Plus.
 Es entstehen keine Steuerungsvariablen. Modus 8 ist der belegte Ganzhausmodus;
 es gibt keine Raum-/Modusheuristik und keinen Wasserdefault. Wasser 0 muss
-ausdrücklich gewählt werden. Die Werte werden erst nach Erwerb der Gerätesperre
-für einen **neuen** Start gelesen. Start aus Pause ignoriert diese Konfiguration
+ausdrücklich gewählt werden. Die Werte werden nach Erwerb der Gerätesperre
+bei einem zulässigen Ruhezustand aus den bestehenden Eigenschaften gelesen.
+Für einen daraus erzeugten **neuen** Start wird die Auswahl bis unmittelbar vor
+I/O erneut verglichen. Eine Änderung sperrt den bereits verbrauchten Versuch.
+Start aus Pause ignoriert diese Konfiguration
 und erzeugt Continue. Fehlende/falsche Werte verhindern den neuen Auftrag.
 Neue Startparameter werden nicht aus unbestätigten Shadowfeldern übernommen.
 
@@ -108,8 +126,7 @@ Der bestehende Einzelziel-GET ohne rohe ID bleibt durch sein Abfrageziel gebunde
 das ist keine zusätzliche vom Gerät gelieferte Identitätsbestätigung.
 
 Native Skriptmethoden wie `ROBO_Starten`/`ROBO_Anhalten` markieren keine manuelle
-Bedienung und verlangen weiterhin positives Shadow-`connected`. Ein unbekannter
-Status berechtigt niemals zur automatischen Steuerung. Symcon kann innerhalb
+Bedienung und bleiben auch bei positivem Shadow-`connected` gesperrt. Symcon kann innerhalb
 von `RequestAction` nicht den menschlichen Ursprung beweisen: Ein Ereignis, das
 bewusst dieselbe Bedienaktion auslöst, darf daher nicht als Umgehung der
 Automationsregel eingerichtet werden. Der Bedienmarker ist kein Zugriffsschutz;
@@ -128,7 +145,14 @@ Feste lokale Bindung: Konto 45174, Geräteinstanz 22708, deren vorhandener Ident
 Deaktivierung, EU-Sitzung samt Revision, JWT-Restgültigkeit über 15 s und
 Cloud-Wartezeit werden unter der geräteweiten Semaphore geprüft und direkt
 vor I/O erneut gelesen. Ein exakt bestätigtes Modellprofil und eine separat
-im Treiber festzulegende individuelle Cloud-ID sind zusätzlich erforderlich.
+im Treiber fest gebundene individuelle Cloud-ID sind zusätzlich erforderlich.
+Das feste Profil lautet `E20 Evo Plus` / SN8 `750Y0015` / Proto 0 /
+`robozone` / `T0xB8_750Y0015.zip` Version `2.5.4`; die Kontoprüfung verlangt
+zusätzlich `stationType=dust_station` und weist widersprüchliche Metadaten ab.
+Das Profil ist gegen die dokumentierte Livecache-Struktur und den lokalen
+Herstellerbericht abgeglichen. Der Archivhash wurde erneut lokal bestätigt:
+`0a275bbd2ee8c076aeb8e1d314a4bbe98fa5c3c6aeb3750414765adc399f24c6`.
+Die anonymisierte Fixture `offline-e20` ist ausdrücklich keine Produktivkennung.
 
 Der spätere native Weg lautet: vorhandene WebFront-Schaltfläche →
 `RequestAction(22284, Wert)` → `RoboHubGeraet::RequestAction('Befehl', Wert)` →
@@ -152,88 +176,136 @@ Befehle. Alte Snapshots verlieren nach Neustart ihre Laufzeitbindung, selbst
 wenn persistente Attribute erhalten bleiben. Es gibt keine Zusicherung gegen
 manuelles Attribut-Rollback, Dateisystemverlust oder mehrere Symcon-Server.
 
-## Spätere Tests und Aktivierung — heute nicht autorisiert
+## Spätere Aktualisierung und Funktionstest — jetzt nicht ausführen
 
-1. Änderungen und Offlineergebnisse reviewen. Die individuelle Cloud-ID der
-   bestehenden Instanz separat bestätigen; Profil vollständig gegen Modell
-   E20 Evo Plus, SN8 750Y0015, Proto 0, Plattform robozone, Plugin 2.5.4 und
-   Staubstation abgleichen. Keine Freigabe allein aus dem Modellnamen ableiten.
-2. **Pause separat freigeben:** genau ein Versuch, genau diese Gerätebindung,
-   kurzes Zeitfenster, Reinigung zuvor über die Hersteller-App starten und vor
-   Ort beobachten. Eine später dafür zu reviewende Aktions-/Zeit-/Einmalbegrenzung
-   vor den normalen Weg setzen; keine allgemeine Freigabe aller Befehle nur für
-   den Test. Den hier vorbereiteten Transport weiterverwenden; vorhandene
-   B8-/Docktickets und deren Verbrauch nicht ändern oder zurücksetzen.
-3. Unmittelbar zuvor die vorhandene Liste ausdrücklich aktualisieren und den
-   normalen Shadow lesen; binnen 120 s Zustand `cleaning` und Fehlerfreiheit
-   prüfen. Einmal die bestehende Pauseaktion auslösen. Cloudannahme, tatsächliches
-   Pausieren und nachfolgender Shadow sind drei getrennte Beobachtungen.
-   Bei unklarem Ausgang keine Wiederholung, kein automatisches Fortsetzen.
-   Testfreigabe anschließend wieder schließen.
-4. **Neuen Start unabhängig freigeben:** gleicher begrenzter Ablauf, zulässiger
-   Ruhezustand und Akku über 15 %. Vorher Fan und Wasser ausdrücklich wählen,
-   Wasser-/Bodenbedingungen vor Ort prüfen. Einmal Start, Beginn der Reinigung
-   und korrekte Zustandsänderung beobachten; danach Testfreigabe schließen.
-   Continue aus echter Pause benötigt ebenfalls einen eigenen Beobachtungsnachweis.
-5. Erst nach Auswertung und ausdrücklicher Produktivfreigabe das exakte Profil
-   in `BEFEHLS_ZUORDNUNGEN`, die individuell bestätigte ID in
-   `BEFEHLS_GERAET_ID` und `BEFEHLE_FREIGEGEBEN=true` zusammen reviewen und
-   bereitstellen. **Aktuell bleiben false, [] und leere ID unverändert.**
-   Eine einzelne Konfigurationsänderung öffnet die Steuerung nicht. Nach späterer
-   Bereitstellung Liste/Shadow in der neuen Laufzeit erneut lesen, Startwerte
-   setzen und vorhandene WebFront-Schaltflächen verwenden. Keine externen
-   Steuerungsskripte und keine neuen Steuerungsvariablen anlegen.
+Der geprüfte Stand enthält die individuelle Gerätebindung und den Freigabeflag
+`true`. Vor einer späteren Übertragung die Eigenschaft `GeraetID` von 22708
+vertraulich gegen die feste Bindung prüfen; keine Kennung in Protokolle übernehmen.
+Eine allgemeine Modellfreigabe, dynamische ID-Übernahme oder Wildcards sind unzulässig.
 
-Native IP-Symcon-Ausführung, reale Start-/Pause-/Continue-Reaktionen,
-cloudseitige Shadowverzögerung und aktionsbezogene Antworten bleiben offen.
-Der erfolgreiche Dockversuch schließt diese Lücken nicht. Reguläre manuelle
-Bedienung braucht den Cloudlistenbefund plus frischen Shadow; automatische
-Bedienung ohne Shadow-Verbindungsnachweis bleibt gesperrt.
+1. Vor dem später separat beauftragten Aktualisieren den bisherigen Modulstand,
+   die Eigenschaften und Attribute sichern. Der lokale Commit enthält die
+   individuelle Gerätekennung und darf nicht zu einem Remote gepusht werden.
+   Vor jeder späteren Remote-Veröffentlichung muss die Kennung aus sämtlichen
+   zu übertragenden Commits entfernt und die Bindung vertraulich bereitgestellt
+   werden; ein nachträglicher Löschcommit allein genügt nicht.
+   Module Control kann nur einen dort erreichbaren Git-Stand beziehen: Solange
+   dieser ausschließlich lokal vorliegt, steht er dort noch nicht als Update bereit.
+   Sobald ein vertraulich bereitgestellter, exakt gebundener Stand erreichbar ist:
+   in IP-Symcon unter Module Control die bestehende RoboHub-Bibliothek auswählen,
+   Branch `feature/eureka-e20-evo-plus` prüfen und „Aktualisieren“ ausführen.
+   Anschließend den tatsächlich übernommenen Quellstand und die lokale Bindung
+   vertraulich vergleichen. Keine Instanzen löschen oder neu anlegen.
+2. In Symcon 9.1 Konto 45174 und Gerät 22708 übernehmen und die Verbindung sowie
+   die bestehende Variable 22284 mit Ident `Befehl` kontrollieren. Beim Übernehmen
+   und Modul-/Kernelstart darf **kein Steuer-POST** entstehen. Alte Snapshots
+   sind nach dem Laufzeitwechsel gesperrt. Einmalverbräuche von B8, Dock und
+   Pause sowie `EurekaBefehlsversuch` erhalten; nichts zurücksetzen.
+3. Im vorhandenen Geräteformular `EurekaStartSaugstufe` bewusst auf 1, 2 oder 3
+   und `EurekaStartWasserstufe` bewusst auf 0 bis 3 setzen und übernehmen.
+   Kein Wert wird vorgegeben; Wasser 0 ist eine ausdrückliche Auswahl.
+   Der Test erfolgt beaufsichtigt am Gerät, mit für die Wasserwahl geeignetem
+   Boden. Hersteller-App und reale Bewegung dienen dem Funktionsabgleich.
+4. Vor **jedem** der vier Schritte ausdrücklich `ROBOHUB_GeraeteSuchen(45174)`
+   und danach `ROBO_Aktualisieren(22708)` verwenden. Liste, Listenempfang und
+   gültiger Shadow müssen in derselben Sitzung/Laufzeit jeweils höchstens
+   120 Sekunden alt, eindeutig zugeordnet und fehlerfrei sein. Die Aufrufe
+   sind hier ausschließlich dokumentiert; sie wurden nicht ausgeführt.
+5. Die folgende Bedienfolge über die vorhandenen WebFront-Schaltflächen
+   durchführen. Die RequestAction-Werte erläutern nur deren vorhandene Belegung:
+
+   | Schritt | Vorbedingung nach frischem Abruf | Bestehende Aktion | Getrennt prüfen |
+   | --- | --- | --- | --- |
+   | Start | `stop`, `charging` oder `charging_finish`, Akku 16–100 %, gültige Startwahl | Start, Wert 1 | Cloudannahme; wirklicher Reinigungsbeginn; nachgelesenes `cleaning` |
+   | Pause | `cleaning` | Pause, Wert 2 | Cloudannahme; wirkliche Pause; nachgelesenes `pause` |
+   | Fortsetzen | `pause` | dieselbe Start-Schaltfläche, Wert 1 | Continue ohne neue Startwerte; wirkliche Fortsetzung; nachgelesenes `cleaning` |
+   | Dock | `cleaning` (allgemein auch `stop` oder `pause`) | Station, Wert 4 | Cloudannahme; wirkliche Rückfahrt; später Stationszustand |
+
+6. Nach jeder Aktion zunächst die reale Reaktion beobachten und danach den
+   Shadow aktualisieren. Keine nächste Aktion auf dem bereits verbrauchten
+   Snapshot auslösen. Eine fehlende Cloudantwort, Fehler, Timeout oder unklare
+   Bewegung beendet die Testfolge; kein automatischer oder blinder manueller
+   Neuversuch. Erst neu bewerten und einen frischen gültigen Stand lesen.
+   Ein ACK beweist keine Ausführung. Eine automatische Entleerung nach Dock
+   ist ein möglicher Stationsfolgeablauf, kein zusätzlich gesendeter Befehl.
+7. Die Anzeige muss bei fehlendem Shadow-`connected` weiterhin auf die fehlende
+   Gerätebestätigung hinweisen; `Erreichbar`, `stand.online` und `GetActivity()`
+   werden nicht künstlich positiv. Frische positive Cloudliste plus gültiger
+   Shadow reichen nur für die ausdrückliche Bedienaktion. Automatische Methoden
+   bleiben auch bei positivem Shadow-Verbindungsbefund gesperrt. Stopp (3), Orten (5)
+   und andere Funktionen erhalten keine Befehlsfreigabe. Es werden keine Timer,
+   Ereignisse, Hintergrundjobs oder externen Laufzeitdienste zur Steuerung angelegt.
+
+Nach Eintragen der exakten Gerätefreigabe verwendet die normale Bedienung ihre
+regulären Kontext- und Verbrauchssperren. Ein alter Pause-Testmarker wird dabei
+weder gelöscht noch erneut benutzt. Er verhindert auch keine reguläre
+Sitzungserneuerung. Die separaten Einmalmethoden und ihre Verbrauchsprüfungen
+bleiben erhalten; ein alter Test wird dadurch nicht wiederholbar. Für Geräte
+außerhalb der exakten regulären Bindung bleibt der bisherige Pause-Testweg
+unverändert. Auch ein regulärer Versuch darf denselben Shadowstand nicht erneut
+verwenden, einschließlich eines zuvor im Pause-Einmaltest verbrauchten Stands.
 
 ## Offlineprüfung
 
-`bash tests/eureka/run-offline.sh` und
-`bash tests/eureka/run-dock-offline.sh` erzwingen getrennte Netz-Namensräume.
-Alle Eureka-Transporte sind Doubles; native Protokollgegenproben nutzen nur
-isolierte Loopback-Nachbauten. Der gemeinsame cURL-Prüfstand deaktiviert die
-echten cURL-Funktionen. Keine Verbindung zu Cloud, Roboter oder Produktiv-Symcon.
+`bash tests/eureka/run-control-offline.sh` bündelt die vollständige Regression
+in einem eigenen Netzwerk-Namensraum, ohne Fallback auf externe Erreichbarkeit.
+Alle Steuertransporte verwenden Doubles. Der gemeinsame HTTPS-Code läuft gegen
+ersetzte cURL-Funktionen; native libcurl-Gegenproben erreichen nur isolierte
+Loopback-Nachbauten. Die vorhandenen einzelnen Runner bleiben verfügbar.
+Temporäre Testschlüssel und Importfixtures sind rein synthetisch und werden
+nirgends produktiv bereitgestellt.
 
-`control-driver-fixture.php` erzeugt ausschließlich im PHP-Prüfprozess eine
-umbenannte Kopie des echten Treibers mit Testprofil und erfundener ID
-`offline-e20`. Produktivdateien werden dafür nicht verändert. Die native
-Integration behält die echten Konto-Kontext-/Verbrauchsprüfungen und bildet
-22708/22284 mit lokalen Doubles nach; der gesonderte HTTP-Prüfstand benutzt
-den echten gemeinsamen HTTPS-Code mit ersetzter cURL-Systemgrenze.
+`control-driver-fixture.php` ersetzt im PHP-Prüfprozess nur Freigabeflag und
+Gerätekennung durch die Testfreigabe für `offline-e20`. Das **echte** einzelne
+E20-Profil bleibt unverändert. Produktivdateien werden dazu nicht verändert.
+Die native Integration nutzt echte Konto-Kontext-/Verbrauchsprüfungen und
+nachgebildete Instanzen 45174/22708 samt bestehender Befehlsvariable 22284.
 
-Geprüft werden die vier Aktionen, fehlende/falsche Startwerte, Akku,
-Online-/Offline-/Unbekannt-Kombinationen, Zeitgrenzen, Geräte-/Sitzungsbindung,
-Zustands-/Fehlerbefunde, Änderungen vor I/O, Doppelbetätigung und unabhängige
-Befehlsobjekte, HTTP-/Cloud-/Transportfehler, Neustart ohne Wiederholung sowie
-die vorhandenen B8-/Dock-Genehmigungs-, Widerrufs- und Verbrauchssperren.
-Abschluss mit PHP 8.2.35: beide vollständigen Runner Exitcode 0, keine Fehler.
+Zusätzlich zu den bisherigen Prüfungen werden die zusammenhängende Folge
+Start → Pause → Fortsetzen → Dock ohne Verbrauchsrücksetzung, sämtliche 36
+Startwert-/Ruhezustandskombinationen, 42 Zustands-/Aktionsgrenzen, ungültige
+Startwerte und fehlender Akku bei Nicht-Startaktionen sowie Auswahländerungen
+vor I/O geprüft. Historische geschlossene, widerrufene und verbrauchte
+Pause-Testmarker bleiben bei regulären Versuchen unverändert; Doppelbedienung
+bleibt auch dann gesperrt. Die alte Pause-Testkennung wird durch die neue
+reguläre Gerätefreigabe nicht geöffnet.
+
+Die bestehende native Automations-Gegenprobe verlangt jetzt auch bei explizitem
+Shadow-`connected=true` null Transporte. Drei bestehende Integrationsprüfungen
+verwenden den Fehlertext der manuellen Sperre statt des früheren globalen
+Freigabetexts; ihre Transport-, Zustands- und Timerprüfungen bleiben erhalten.
+Es wurde kein zusätzlicher Testmechanismus angelegt.
+
+Abschlussprüfung mit PHP 8.2.35:
+`bash tests/eureka/run-control-offline.sh` beendet mit Exitcode 0,
+3.547 Einzelprüfungen bestanden, keine Fehler im abschließenden Gesamtlauf.
 
 | Prüfstand | Bestanden |
 | --- | ---: |
 | Modulstruktur-Gegenproben | 22 |
-| B8-Diagnose einschließlich Parserformaten | 444 (Dockrunner ohne Signaturgeneratoren: 399) |
+| Pause-Einmaltest | 114 |
+| Dock-Einmaltest | 244 |
+| Gemeinsamer HTTPS-Code mit cURL-Doubles | 97 |
+| B8-Diagnose | 444 |
 | B8-Signierer / Import / Dateisystem-Import | 16 / 19 / 39 |
-| Dock-Kryptografie / Dock-Sicherheit | 49 / 244 |
-| Gemeinsamer HTTPS-Code mit cURL-Doubles | 77 |
-| Native libcurl-Gegenversuche gegen isoliertes Loopback | 21 |
-| Befehle einschließlich manueller Listenverbindung | 344 |
+| Dock-Kryptografie | 49 |
+| Native libcurl-Gegenversuche im isolierten Loopback | 21 |
+| Befehlsplanung und Sperren | 344 |
 | Zustandsbewertung | 683 |
 | Token-/GET-Regressionen | 72 |
-| RoboHub-Gesamtprüfstand | 1.266 |
-| PHP-Lint | 88 Dateien |
+| Vollständiger RoboHub-Prüfstand | 1.383 |
+| PHP-Lint | 92 Dateien |
 
-Die vollständigen Runner enthielten zunächst 1.262 RoboHub-Einzelprüfungen.
-Vier abschließend ergänzte Gegenproben prüfen den Verbrauch über verschiedene
-Befehle hinweg, den nächsten gültigen Shadowstand, dessen erneuten Verbrauch
-und den automatischen Einstieg mit explizitem Shadow-Nachweis. Der danach
-erneut vollständig ausgeführte RoboHub-Prüfstand bestand alle 1.266 Prüfungen,
-darunter insgesamt 56 neue native Steuerungsprüfungen. Abschließender PHP-Lint
-des ergänzten Prüfstands und `git diff --check` ebenfalls fehlerfrei.
-`RoboHubEurekaDock.php`, `RoboHubEurekaDiagnose.php` und
-`RoboHubEurekaGenehmigung.php` wurden nicht verändert. Eine Dock-Gegenprobe
-passt ausschließlich ihre Anzeigeerwartung an den Offlinevorrang an;
-ihre Freigabe-/Transporterwartungen bleiben erhalten.
+Gegenüber dem Basisstand wurden 102 native Bedienprüfungen ergänzt.
+`git diff --check` und `bash -n tests/eureka/run-control-offline.sh` sind
+ebenfalls fehlerfrei. Ein separater früherer RoboHub-Lauf hatte einen
+sporadischen Timeout des lokalen iRobot-UDP-Nachbaus; im abschließenden
+netzisolierten Gesamtlauf bestanden auch diese Gegenproben.
+
+Die Dateien `RoboHubEurekaDock.php`, `RoboHubEurekaDiagnose.php`,
+`RoboHubEurekaGenehmigung.php`, `RoboHubEurekaPauseTest.php` und
+`RoboHubEurekaProtokoll.php` bleiben gegenüber 517d682 unverändert.
+Die individuelle Produktivkennung wird im Offlineprüfstand nicht verwendet;
+die positive Bedienregression nutzt die ausdrücklich
+erfundene Offlinekennung. Kein Offlineergebnis ersetzt den späteren realen
+Start-/Fortsetzen-Funktionsnachweis.

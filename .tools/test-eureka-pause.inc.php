@@ -55,9 +55,8 @@ try {
     $pk->WriteAttributeString('Schnappschuss', json_encode([$g['id'] => ['p' => $g['stand']]]));
     $pg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
     check('Auch Fortsetzen nach beobachteter Pause bleibt gesperrt', count($pt->posts) === 1);
-    $ref = new ReflectionClass(RoboHubEureka::class);
-    check('Alle drei globalen Produktivsperren unverändert', $ref->getConstant('BEFEHLE_FREIGEGEBEN') === false
-        && $ref->getConstant('BEFEHLS_ZUORDNUNGEN') === [] && $ref->getConstant('BEFEHLS_GERAET_ID') === '');
+    check('Reguläre Gerätefreigabe erweitert den fremden Pause-Einmaltest nicht',
+        !RoboHubEureka::regulaereBedienungFuer('offline-e20'));
 } finally {
     $GLOBALS['OBJ'] = $pauseObj; $GLOBALS['INST'] = $pauseInst; $GLOBALS['robohubTreiberFabrik'] = $pauseFabrik;
 }
