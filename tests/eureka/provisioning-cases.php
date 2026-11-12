@@ -177,7 +177,7 @@ $tests['Bereitstellung: monotone Genehmigungsfrist schließt trotz zurückgestel
 };
 function offlineSignieren(array $a, string $sk): array
 {
-    $proc = proc_open([PHP_BINARY, __DIR__ . '/../../tools/eureka-b8-signieren.php'],
+    $proc = proc_open([PHP_BINARY, __DIR__ . '/../../.tools/eureka-b8-signieren.php'],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w'], 3 => ['pipe', 'r']], $pipes);
     sicher(is_resource($proc));
     fwrite($pipes[0], json_encode($a)); fclose($pipes[0]);

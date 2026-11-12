@@ -18,7 +18,7 @@ Sperre neben dem Diagnoseattribut. Neu ist ein **signierter externer Import**:
 2. Ein separater Administrationsrechner prüft und genehmigt die erwartete
    Kennung und die konkrete Cloud-Gerätekennung ausdrücklich. Nur dort liegt
    der private Ed25519-Schlüssel.
-3. `tools/eureka-b8-signieren.php` signiert die manuell genehmigte Nutzlast.
+3. `.tools/eureka-b8-signieren.php` signiert die manuell genehmigte Nutzlast.
    Es liest JSON von stdin, den Base64-Privatschlüssel ausschließlich über FD 3.
    Es ermittelt niemals selbst eine Symcon-Kennung und schreibt keine Dateien.
 4. `ROBOHUB_EurekaB8Bereitstellen(45174, $dokument)` prüft
@@ -174,7 +174,7 @@ Danach ausschließlich manuell:
 4. Auf diesem Rechner ausführen:
 
    ```sh
-   php tools/eureka-b8-signieren.php < /run/admin/b8-antrag.json 3< /run/admin/b8-private.base64 > /run/admin/b8-signiert.json
+   php .tools/eureka-b8-signieren.php < /run/admin/b8-antrag.json 3< /run/admin/b8-private.base64 > /run/admin/b8-signiert.json
    ```
 
    Die Pfade stehen für dort manuell bereitgestellte, geschützte Dateien. Keine
@@ -243,7 +243,7 @@ explizite Vorprüfung mit Listenabruf ist weiterhin ein separater Aufruf.
   Widerrufveto vor Import sowie signierte Gerätebindung an allen Übergängen.
 - `libs/RoboHubEurekaGenehmigung.php`: reine Signatur-/Schemaprüfung, fester
   externer Vertrauensanker, striktes v2-Schema mit Cloud-Gerätekennung.
-- `tools/eureka-b8-signieren.php`: externes CLI-Werkzeug mit ausdrücklicher
+- `.tools/eureka-b8-signieren.php`: externes CLI-Werkzeug mit ausdrücklicher
   separater Bestätigung von Laufzeit und Cloud-Gerätekennung.
 - `tests/eureka/diagnostic-test.php`, `tests/eureka/provisioning-cases.php`:
   zusätzliche Offlinefälle im bestehenden Harness, vollständiger Zielwechsel.

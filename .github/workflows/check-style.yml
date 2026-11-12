@@ -12,6 +12,8 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
+      - name: Symcon-Modulstruktur (offline)
+        run: php tests/structure-test.php
       - name: PHP Lint
         run: find . -name "*.php" -print0 | xargs -0 -n1 php -l
       - name: Prüfstand (ohne Symcon, ohne Netz)

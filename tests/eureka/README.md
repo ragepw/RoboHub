@@ -1,5 +1,32 @@
 # Eureka E20 Evo Plus: Offline-Prüfung und späterer Lesetest
 
+## Symcon-Modulstruktur (12.11.2026)
+
+Das externe Signierwerkzeug liegt unter `.tools/eureka-b8-signieren.php`.
+Laut [Symcon-Strukturvorgaben](https://www.symcon.de/de/service/dokumentation/entwicklerbereich/sdk-tools/sdk-php/struktur/)
+ignoriert die Modulerkennung Punktordner sowie `libs/`, `docs/`, `imgs/`,
+`tests/` und `actions/`. Der bisherige Ordner `tools/` gehört nicht dazu und
+wurde entfernt. Die drei RoboHub-Modulordner enthalten jeweils `module.json`
+und `module.php`; weitere ungültige Modulverzeichnisse wurden nicht gefunden.
+Der neue Offline-Test `php tests/structure-test.php` prüft alle Verzeichnisse
+direkt im Bibliotheksstamm auf diese Regeln, vorhandene Moduldateien und
+syntaktisch gültige JSON-Objekte. Er enthält Gegenproben für den ursprünglichen
+Fehler, weitere unzulässige Verzeichnisse und die dokumentierten Ausnahmen.
+Er läuft im isolierten Runner und in der CI, ohne Symcon oder Netzwerk.
+
+Die externe Schlüsseltrennung bleibt unverändert: Das Werkzeug wird nur auf
+dem separaten Administrationsrechner verwendet und liest den privaten Schlüssel
+über FD 3. Es wurden keine Schlüssel oder Freigaben bereitgestellt.
+`runtime-display-cases.php` gehört zu HEAD `5a2c3dc`: Der dort versionierte
+Diagnoseprüfstand bindet die Datei bereits ein, und der zugehörige Bericht
+beschreibt ihre 17 Anzeigenfälle. Sie wird als bisher fehlender Bestandteil
+dieser Änderung mit aufgenommen.
+
+Abschlussprüfung: `bash tests/eureka/run-offline.sh`, Exitcode 0.
+22 Struktur-Gegenproben, alle bestehenden Offline-Prüfstände und PHP-Lint
+für 78 Dateien bestanden; Bash-/Python-Syntax und `git diff --check` fehlerfrei.
+Keine native Symcon-Prüfung oder produktive Änderung durchgeführt.
+
 ## Administrative Bereitstellung (lokal, 12.11.2026)
 
 [Aktueller Abschlussbericht und späterer Ablauf](../../docs/eureka-b8-bereitstellung.md).
