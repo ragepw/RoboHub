@@ -6,6 +6,7 @@ export ROBOHUB_TEST_OUTER_NETNS="$(readlink /proc/self/ns/net)"
 exec bwrap --unshare-net --dev-bind / / -- bash -euo pipefail -c '
 php tests/structure-test.php
 php tests/eureka/diagnostic-test.php
+php tests/eureka/signer-test.php
 php tests/eureka/import-test.php
 php tests/eureka/root-import-test.php
 php -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo,curl_close tests/eureka/diagnostic-http-test.php
