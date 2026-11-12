@@ -14,11 +14,11 @@ final class RoboHubEurekaGenehmigung
     public static function dockPruefen(string $dokument, string $publicKey, string $boot, int $jetzt): array
     {
         return self::dokumentPruefen($dokument, $publicKey, $boot, $jetzt,
-            'robohub/eureka/dock/runtime/v1', RoboHubEurekaDock::BEFEHL, 60);
+            'robohub/eureka/dock/runtime/v1', RoboHubEurekaDock::BEFEHL, 60, true);
     }
 
     private static function dokumentPruefen(string $dokument, string $publicKey, string $boot, int $jetzt,
-        string $zweck, string $befehl, int $maxDauer): array
+        string $zweck, string $befehl, int $maxDauer, bool $dockV2Erlaubt = false): array
     {
         try {
             if (strlen($dokument) > 4096 || !function_exists('sodium_crypto_sign_verify_detached')) {
@@ -32,7 +32,13 @@ final class RoboHubEurekaGenehmigung
             if ($roh === false || $sig === false || $pk === false || strlen($pk) !== 32 || strlen($sig) !== 64 ||
                 !sodium_crypto_sign_verify_detached($sig, $roh, $pk)) { throw new RuntimeException(); }
             $g = json_decode($roh, true, 8, JSON_THROW_ON_ERROR);
-            if (!is_array($g) || array_keys($g) !== ['zweck', 'konto', 'instanz', 'cloudGeraetId', 'modell', 'befehl', 'erwartet', 'von', 'bis'] ||
+            $felder = ['zweck', 'konto', 'instanz', 'cloudGeraetId', 'modell', 'befehl', 'erwartet', 'von', 'bis'];
+            if ($dockV2Erlaubt && is_array($g) && ($g['zweck'] ?? null) === 'robohub/eureka/dock/runtime/v2') {
+                $zweck = 'robohub/eureka/dock/runtime/v2';
+                $felder[] = 'ausnahmeVerbindungUnbekannt';
+                if (!is_bool($g['ausnahmeVerbindungUnbekannt'] ?? null)) { throw new RuntimeException(); }
+            }
+            if (!is_array($g) || array_keys($g) !== $felder ||
                 $g['zweck'] !== $zweck || $g['konto'] !== 45174 || $g['instanz'] !== 22708 ||
                 !is_string($g['cloudGeraetId']) || $g['cloudGeraetId'] === '' || strlen($g['cloudGeraetId']) > 256 ||
                 trim($g['cloudGeraetId']) !== $g['cloudGeraetId'] || preg_match('/[\x00-\x1f\x7f]/', $g['cloudGeraetId']) ||

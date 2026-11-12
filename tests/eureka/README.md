@@ -402,3 +402,21 @@ Implementierung, native API, Genehmigungsschema, Prüfgrenzen und Voraussetzunge
 `bash tests/eureka/run-dock-offline.sh` erzwingt Netzisolierung und deaktiviert
 Signaturgeneratoren; signaturerzeugende Provisionierungs-/Importtests werden in
 diesem Runner ausgelassen. Die normalen Steuerbefehle bleiben gesperrt.
+
+Die [Online-Nachprüfung](../../docs/eureka-dock-online-nachweis.md) dokumentiert
+die statisch geprüften Herstellerartefakte und die offene Semantik/Frische von
+Listen-`connected`. Der Dock-Einmalpfad erlaubt jetzt eine ausdrücklich signierte
+Ausnahme für vollständig fehlendes Shadow-`connected`, zusätzlich gebunden an
+eine bei der Ticketausgabe bestätigte Vor-Ort-Beobachtung. Verbindung bleibt
+„unbekannt“; explizit offline sperrt immer. Normale Befehle bleiben gesperrt.
+Der Dockprüfstand enthält 36 Kombinationen aus Verbindungswerten und Listen-/
+Shadowalter sowie Einwilligungs-, Beobachtungs-, Identitäts-, Ablauf-, Widerrufs-,
+Neustart-, Fehler- und Einmalverbrauchsproben. `diagnostic-http-test.php` prüft
+den Ausnahmeweg am echten gemeinsamen HTTPS-Code mit ersetzter cURL-Grenze.
+Keine echten Genehmigungen werden erzeugt oder importiert.
+
+Aktueller Lauf `bash tests/eureka/run-dock-offline.sh`: Exitcode 0;
+230 Docktests, 41 HTTPS-Double-Tests, 399 B8-Diagnose-, 284 Befehls-,
+683 Zustands- und 72 Tokenprüfungen bestanden. Vollständiger RoboHub-Prüfstand,
+22 Struktur-Gegenproben, 83 PHP-Lints und `git diff --check` ebenfalls bestanden.
+Netzisolierung war aktiv; Signatur-/Schlüsselgeneratoren waren deaktiviert.

@@ -170,25 +170,31 @@ $tests['Unerwartete HTTP-Version wird ohne weiteren Transport verworfen'] = func
         sicher($GLOBALS['execCalls'] === 1 && $GLOBALS['closeCalls'] === 1);
     } finally { unset($GLOBALS['httpVersion']); }
 };
-function dockHttpFixture(): array
+function dockHttpFixture(bool $ausnahme = false): array
 {
     $o = new stdClass();
     $g = e20Fixture()['geraet']; $g['stand']['zeit'] = $g['verbindungEmpfangen'] = time();
+    if ($ausnahme) {
+        unset($g['stand']['roh']['connected']); $g['stand']['online'] = false;
+        $g['stand']['statusquelle'] = ['quelle'=>'shadow-get','geraetezeit'=>null];
+    }
     $o->k = ['konto'=>45174,'instanz'=>22708,'hersteller'=>'eureka','region'=>'eu',
         'jetzt'=>time(),'monoton'=>100000,'boot'=>(time()-100).':'.str_repeat('d',64),
-        'revision'=>'offline','warteBis'=>0,'kontoname'=>'offline@example.invalid','cacheZeit'=>time(),
+        'revision'=>'offline','warteBis'=>0,'kontoname'=>'offline@example.invalid','cacheZeit'=>time(),'benutzer'=>'@admin',
         'geraet'=>$g,'buendel'=>['region'=>'eu','access_token'=>'e30.'.base64_encode(json_encode(['exp'=>time()+3600])).'.offline']];
     $o->f = []; $o->l = ['erwartet'=>$o->k['boot'],'zustand'=>'genehmigt','cloudGeraetId'=>$g['id'],
-        'genehmigtBis'=>time()+60,'genehmigtMonotonBis'=>160000];
+        'genehmigtBis'=>time()+60,'genehmigtMonotonBis'=>160000,'ausnahmeVerbindungUnbekannt'=>$ausnahme];
     $d = new RoboHubEurekaDock(fn()=>$o->k,fn()=>$o->f,function ($v) use ($o) { $o->f=$v; },
         fn($fn)=>$fn(),fn()=>$o->l,function ($v) use ($o) { $o->l=$v; });
-    $f = $d->freigeben(60,RoboHubEurekaDock::BESTAETIGUNG)['freigabe'];
+    $f = $d->freigeben(60,RoboHubEurekaDock::BESTAETIGUNG,
+        $ausnahme ? RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG : '')['freigabe'];
     return [$d,$f,$o];
 }
+foreach ([false,true] as $ausnahme) {
 foreach ([200,401,429,500,302,307,'timeout'] as $fall) {
-    $tests['Dock im echten gemeinsamen HTTPS-Code ohne Retry: ' . $fall] = function () use ($fall): void {
+    $tests['Dock im echten gemeinsamen HTTPS-Code ohne Retry ' . ($ausnahme ? 'mit Ausnahme ' : '') . ': ' . $fall] = function () use ($fall,$ausnahme): void {
         unset($GLOBALS['vorCurl']); $GLOBALS['execCalls']=$GLOBALS['closeCalls']=0; $GLOBALS['httpCalls']=[];
-        [$d,$f,$o] = dockHttpFixture();
+        [$d,$f,$o] = dockHttpFixture($ausnahme);
         $GLOBALS['status'] = is_int($fall) ? $fall : 0;
         $GLOBALS['response'] = $fall === 'timeout' ? false : '{"errorCode":0}';
         $GLOBALS['vorCurl'] = function () use ($o): void {
@@ -209,8 +215,8 @@ foreach ([200,401,429,500,302,307,'timeout'] as $fall) {
     };
 }
 foreach (['widerruf','zustand','ablauf','konfiguration'] as $fall) {
-    $tests['Dock letzte Prüfung verhindert I/O: ' . $fall] = function () use ($fall): void {
-        [$d,$f,$o] = dockHttpFixture();
+    $tests['Dock letzte Prüfung verhindert I/O ' . ($ausnahme ? 'mit Ausnahme ' : '') . ': ' . $fall] = function () use ($fall,$ausnahme): void {
+        [$d,$f,$o] = dockHttpFixture($ausnahme);
         $GLOBALS['execCalls']=0; $GLOBALS['httpCalls']=[];
         $GLOBALS['beiOptionen'] = function () use ($d,$o,$fall): void {
             if ($fall === 'widerruf') { $d->widerrufen(); }
@@ -224,6 +230,7 @@ foreach (['widerruf','zustand','ablauf','konfiguration'] as $fall) {
             sicher($GLOBALS['execCalls'] === 0);
         } finally { unset($GLOBALS['beiOptionen'],$GLOBALS['optionErgebnis']); }
     };
+}
 }
 $tests['Dock-Flag erlaubt weder Start/Pause noch B8 oder Versand ohne Berechtigung'] = function (): void {
     $h=new ReflectionMethod(RoboHubEureka::class,'httpAusfuehren'); $GLOBALS['httpCalls']=[];

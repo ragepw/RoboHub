@@ -7,38 +7,107 @@ function IPS_IsAdministrator() { return $GLOBALS['anzeigeAdmin'] ?? true; }
 function IPS_GetLoggedInUser() { return $GLOBALS['anzeigeBenutzer'] ?? '@admin'; }
 require __DIR__ . '/diagnostic-test.php';
 
-function dockKonto(): array
+function dockKonto(bool $unbekannt = false): array
 {
     [$k, $t] = konto();
     $k->attrs['EurekaDockVersuch'] = '{}';
-    shadowAendern($k, function (&$s): void { $s['roh']['connected'] = true; unset($s['online']); });
+    shadowAendern($k, function (&$s) use ($unbekannt): void {
+        $s['statusquelle'] = ['quelle' => 'shadow-get', 'geraetezeit' => null];
+        if ($unbekannt) { unset($s['roh']['connected']); $s['online'] = false; }
+        else { $s['roh']['connected'] = true; unset($s['online']); }
+    });
     $k->EurekaDockVorpruefen();
     return [$k, $t];
 }
-function dockGenehmigt(RoboHubKonto $k): void
+function dockGenehmigt(RoboHubKonto $k, bool $ausnahme = false): void
 {
     // Ausschließlich simulierte Laufzeitfreigabe, kein signiertes Dokument/Import.
     $k->puffer['EurekaDockLaufzeitfreigabe'] = json_encode([
         'erwartet' => $k->EurekaDockLaufzeitAnzeigen(), 'zustand' => 'genehmigt',
         'cloudGeraetId' => 'offline-e20', 'genehmigtBis' => time() + 60,
+        'ausnahmeVerbindungUnbekannt' => $ausnahme,
         'genehmigtMonotonBis' => intdiv(hrtime(true), 1000000) + 60000]);
 }
-function dockTicket(RoboHubKonto $k): string
+function dockTicket(RoboHubKonto $k, bool $ausnahme = false): string
 {
-    return json_decode($k->EurekaDockFreigeben(60, RoboHubEurekaDock::BESTAETIGUNG), true)['freigabe'];
+    return json_decode($k->EurekaDockFreigeben(60, RoboHubEurekaDock::BESTAETIGUNG,
+        $ausnahme ? RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG : ''), true)['freigabe'];
 }
 $tests = [];
+$tests['Beobachteter E20: Unbekannt bleibt unbekannt, Vorprüfung erteilt keine Ausnahme'] = function (): void {
+    [$k, $t] = dockKonto(true);
+    $vorher = $k->attrs['Schnappschuss'];
+    sicher(str_contains($k->EurekaDockVorpruefen(), 'Verbindung unbekannt'));
+    gesperrt(fn() => dockTicket($k, true));
+    sicher($t->calls === [] && $k->attrs['Schnappschuss'] === $vorher);
+    sicher($k->GetBuffer('EurekaDockLaufzeitfreigabe') === '');
+};
+// Synthetische Gegenproben, keine Aussage über reale E20-Shadowfelder.
+foreach ([true, false, null] as $liste) {
+    foreach ([true, false, null] as $shadow) {
+        foreach ([5, 125] as $listenalter) {
+            foreach ([5, 125] as $shadowalter) {
+                $tests['Online-Nachweis ' . json_encode([$liste, $shadow, $listenalter, $shadowalter])] =
+                    function () use ($liste, $shadow, $listenalter, $shadowalter): void {
+                        [$k, $t] = konto();
+                        $k->attrs['EurekaDockVersuch'] = '{}';
+                        $jetzt = time();
+                        $k->attrs['GeraeteStand'] = $jetzt - $listenalter;
+                        geraetAendern($k, function (&$g) use ($liste, $jetzt, $listenalter): void {
+                            unset($g['roh']['connected']);
+                            if ($liste !== null) { $g['roh']['connected'] = $liste; }
+                            $g['online'] = $liste === true;
+                            $g['verbindungEmpfangen'] = $jetzt - $listenalter;
+                        });
+                        shadowAendern($k, function (&$s) use ($shadow, $jetzt, $shadowalter): void {
+                            unset($s['roh']['connected']);
+                            if ($shadow !== null) { $s['roh']['connected'] = $shadow; }
+                            $s['online'] = $shadow === true;
+                            $s['statusquelle'] = ['quelle' => 'shadow-get', 'geraetezeit' => null];
+                            $s['zeit'] = $jetzt - $shadowalter;
+                        });
+                        $g = json_decode($k->attrs['Geraete'], true)[0];
+                        $s = json_decode($k->attrs['Schnappschuss'], true)[$g['id']]['p'];
+                        $anzeige = RoboHubEurekaZustand::erreichbarkeit($s['roh'], $g, $jetzt);
+                        // Fehlendes connected ist unbekannt, niemals bestätigtes Offline.
+                        sicher($anzeige['shadow'] === $shadow);
+                        sicher($anzeige['verbindung'] === ($shadow ?? ($listenalter <= 120 ? $liste : null)));
+                        if ($liste === true && $shadow !== false && $listenalter <= 120 && $shadowalter <= 120) {
+                            sicher(str_contains($k->EurekaDockVorpruefen(), 'bestanden'));
+                        } else {
+                            gesperrt(fn() => $k->EurekaDockVorpruefen());
+                        }
+                        sicher($t->calls === [] && $k->GetBuffer('EurekaDockLaufzeitfreigabe') === '');
+                        // Erst signiertes Opt-in UND unmittelbare Beobachtung erlauben ein Ticket.
+                        if ($liste === true && $shadow !== false && $listenalter <= 120 && $shadowalter <= 120) {
+                            dockGenehmigt($k, true);
+                            $ticket = dockTicket($k, true);
+                            $t->antwort = antwort();
+                            $r = json_decode($k->EurekaDockTesten($ticket), true);
+                            sicher($r['verbindung'] === ($shadow === true ? 'online' : 'unbekannt'));
+                            sicher(count($t->calls) === 1);
+                        } else {
+                            dockGenehmigt($k, true);
+                            gesperrt(fn() => dockTicket($k, true));
+                            sicher($t->calls === []);
+                        }
+                    };
+            }
+        }
+    }
+}
 $tests['Native Vorprüfung/Anzeige geben nichts frei, B8 ist wirkungslos'] = function (): void {
     [$k,$t] = dockKonto(); $b8 = $k->puffer['EurekaB8Laufzeitfreigabe'];
     sicher($k->GetBuffer('EurekaDockLaufzeit') !== $k->GetBuffer('EurekaB8Laufzeit'));
     gesperrt(fn() => dockTicket($k)); gesperrt(fn() => $k->EurekaDockTesten(str_repeat('a',64)));
     sicher($t->calls === [] && $k->puffer['EurekaB8Laufzeitfreigabe'] === $b8);
 };
+foreach ([false,true] as $ausnahme) {
 foreach (['cleaning','pause','stop'] as $state) {
-    $tests['Native Dock-Ausführung einmalig aus ' . $state] = function () use ($state): void {
-        [$k,$t] = dockKonto();
+    $tests['Native Dock-Ausführung ' . ($ausnahme ? 'mit Ausnahme ' : '') . 'einmalig aus ' . $state] = function () use ($state,$ausnahme): void {
+        [$k,$t] = dockKonto($ausnahme);
         shadowAendern($k, function (&$s) use ($state): void { $s['roh']['state'] = $state; unset($s['roh']['parentState']); });
-        dockGenehmigt($k); $ticket = dockTicket($k);
+        dockGenehmigt($k,$ausnahme); $ticket = dockTicket($k,$ausnahme);
         $b8 = $k->puffer['EurekaB8Laufzeitfreigabe']; $shadow = $k->attrs['Schnappschuss'];
         $t->antwort = antwort();
         $r = json_decode($k->EurekaDockTesten($ticket), true);
@@ -49,6 +118,7 @@ foreach (['cleaning','pause','stop'] as $state) {
         sicher(count($t->calls) === 1 && $shadow === $k->attrs['Schnappschuss'] && $b8 === $k->puffer['EurekaB8Laufzeitfreigabe']);
     };
 }
+}
 $mutationen = [
     'Liste alt' => fn($k) => $k->attrs['GeraeteStand'] = time()-121,
     'Shadow alt' => fn($k) => shadowAendern($k, function (&$s): void { $s['zeit'] = time()-121; }),
@@ -56,6 +126,8 @@ $mutationen = [
     'Shadow getrennt' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['connected'] = false; }),
     'Shadow Verbindung fehlt' => fn($k) => shadowAendern($k, function (&$s): void { unset($s['roh']['connected']); }),
     'Liste getrennt' => fn($k) => geraetAendern($k, function (&$g): void { $g['roh']['connected'] = false; }),
+    'Shadow falsches Ziel' => fn($k) => shadowAendern($k, function (&$s): void { $s['deviceId'] = 'different'; }),
+    'Shadow rohe Fremdkennung' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['deviceId'] = 'different'; }),
     'Fehler' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['deviceFault'] = [1]; }),
     'Docked' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['state'] = 'charging'; }),
     'Unbekannt' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['state'] = 'unknown'; }),
@@ -80,12 +152,132 @@ foreach ($mutationen as $name => $mutation) {
         };
     }
 }
-foreach ([401,429,500,302,'timeout','invalid'] as $fall) {
-    $tests['Kein Retry/Refresh bei ' . $fall] = function () use ($fall): void {
-        [$k,$t] = dockKonto(); dockGenehmigt($k); $ticket = dockTicket($k);
+// Dieselben Sperren mit ausdrücklich aktivierter Ausnahme, auch unmittelbar vor I/O.
+$ausnahmeMutationen = $mutationen;
+unset($ausnahmeMutationen['Shadow Verbindung fehlt']);
+$ausnahmeMutationen += [
+    'Shadow connected null' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['connected'] = null; }),
+    'Shadow connected falscher Typ' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['connected'] = 'true'; }),
+    'Shadow rohe Online-Meldung offline' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['online'] = false; }),
+    'Shadow Quelle fehlt' => fn($k) => shadowAendern($k, function (&$s): void { unset($s['statusquelle']); }),
+    'Shadow Quelle kein GET' => fn($k) => shadowAendern($k, function (&$s): void { $s['statusquelle']['quelle'] = 'mqtt'; }),
+    'Abgeleiteter Shadow online widerspricht fehlendem Nachweis' => fn($k) => shadowAendern($k, function (&$s): void { $s['online'] = true; }),
+    'Liste connected fehlt' => fn($k) => geraetAendern($k, function (&$g): void { unset($g['roh']['connected']); }),
+    'Liste Online-Meldung offline' => fn($k) => geraetAendern($k, function (&$g): void { $g['roh']['online'] = false; }),
+    'Liste normalisiert offline' => fn($k) => geraetAendern($k, function (&$g): void { $g['online'] = false; }),
+    'Liste rohe Fremdkennung' => fn($k) => geraetAendern($k, function (&$g): void { $g['roh']['deviceId'] = 'different'; }),
+    'Liste Kennung fehlt' => fn($k) => geraetAendern($k, function (&$g): void { unset($g['roh']['deviceId']); }),
+    'Liste doppelt' => fn($k) => $k->attrs['Geraete'] = json_encode(array_merge(json_decode($k->attrs['Geraete'],true), json_decode($k->attrs['Geraete'],true))),
+    'Liste zukünftig' => fn($k) => $k->attrs['GeraeteStand'] = time()+60,
+    'Shadow zukünftig' => fn($k) => shadowAendern($k, function (&$s): void { $s['zeit'] = time()+60; }),
+    'Shadow Fehlerentwarnung fehlt' => fn($k) => shadowAendern($k, function (&$s): void { unset($s['roh']['deviceFault']); }),
+    'Shadow Zustand widersprüchlich' => fn($k) => shadowAendern($k, function (&$s): void { $s['roh']['parentState'] = 'sleep'; }),
+    'Anderer Administrator' => fn($k) => $GLOBALS['anzeigeBenutzer'] = '@other-admin',
+    'Falsches Konto' => fn($k) => $k->InstanceID = 1,
+    'Widerruf' => fn($k) => $k->EurekaDockWiderrufen(),
+    'Laufzeitpuffer gelöscht' => fn($k) => $k->puffer['EurekaDockLaufzeitfreigabe'] = '',
+    'Ausnahmeeinwilligung entfernt' => function ($k): void {
+        $l = json_decode($k->puffer['EurekaDockLaufzeitfreigabe'],true);
+        unset($l['ausnahmeVerbindungUnbekannt']);
+        $k->puffer['EurekaDockLaufzeitfreigabe'] = json_encode($l);
+    },
+    'Vor-Ort-Beobachtung geändert' => function ($k): void {
+        $f = json_decode($k->attrs['EurekaDockVersuch'],true);
+        $f['beaufsichtigung']['vorOrt']['am']--;
+        $k->attrs['EurekaDockVersuch'] = json_encode($f);
+    },
+];
+foreach ($ausnahmeMutationen as $name => $mutation) {
+    foreach (['vor Versuch','vor I/O'] as $phase) {
+        $tests['Ausnahme: ' . $name . ' ' . $phase] = function () use ($mutation,$phase): void {
+            [$k,$t] = dockKonto(true); dockGenehmigt($k,true); $ticket = dockTicket($k,true);
+            if ($phase === 'vor Versuch') { $mutation($k); }
+            else { $t->vorTransport = fn() => $mutation($k); }
+            gesperrt(fn() => $k->EurekaDockTesten($ticket)); sicher($t->calls === []);
+        };
+    }
+}
+foreach ([true,false,null,'true',1] as $einwilligung) {
+    foreach (['', 'ja', RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG] as $vorOrt) {
+        $tests['Ausnahme verlangt zwei Einwilligungen ' . json_encode([$einwilligung,$vorOrt])] = function () use ($einwilligung,$vorOrt): void {
+            [$k,$t] = dockKonto(true); dockGenehmigt($k);
+            $l = json_decode($k->puffer['EurekaDockLaufzeitfreigabe'],true);
+            if ($einwilligung === null) { unset($l['ausnahmeVerbindungUnbekannt']); }
+            else { $l['ausnahmeVerbindungUnbekannt'] = $einwilligung; }
+            $k->puffer['EurekaDockLaufzeitfreigabe'] = json_encode($l);
+            if ($einwilligung === true && $vorOrt === RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG) {
+                $f = json_decode($k->EurekaDockFreigeben(60,RoboHubEurekaDock::BESTAETIGUNG,$vorOrt),true);
+                sicher($f['verbindung'] === 'unbekannt' && $f['ausnahmeVerbindungUnbekannt'] === true);
+                $snapshot = $k->attrs['Schnappschuss'];
+                $t->antwort = antwort();
+                $r = json_decode($k->EurekaDockTesten($f['freigabe']),true);
+                sicher($r['verbindung'] === 'unbekannt' && !$r['ausgefuehrt'] && count($t->calls) === 1);
+                sicher($snapshot === $k->attrs['Schnappschuss']);
+                gesperrt(fn() => dockTicket($k,true));
+                gesperrt(fn() => $k->EurekaDockTesten($f['freigabe']));
+            } else {
+                // Eine persistierte Checkbox ist niemals Eingabe für die Beobachtung.
+                $k->props['VorOrtBestaetigt'] = true;
+                gesperrt(fn() => $k->EurekaDockFreigeben(60,RoboHubEurekaDock::BESTAETIGUNG,$vorOrt));
+                sicher($t->calls === [] && $k->attrs['EurekaDockVersuch'] === '{}');
+            }
+        };
+    }
+}
+// Verstellbare lokale Uhren statt Warten oder manipulierter Ablaufzeiten.
+function dockZeitFixture(): array
+{
+    [$k] = dockKonto(true);
+    $o = new stdClass();
+    $o->k = (new ReflectionMethod(RoboHubKonto::class,'eurekaDockKontext'))->invoke($k);
+    $o->k['monoton'] = 100000;
+    $o->f = [];
+    $o->l = ['erwartet'=>$o->k['boot'],'zustand'=>'genehmigt','cloudGeraetId'=>'offline-e20',
+        'genehmigtBis'=>$o->k['jetzt']+60,'genehmigtMonotonBis'=>160000,'ausnahmeVerbindungUnbekannt'=>true];
+    $d = new RoboHubEurekaDock(fn()=>$o->k,fn()=>$o->f,function ($v) use ($o): void { $o->f=$v; },
+        fn($fn)=>$fn(),fn()=>$o->l,function ($v) use ($o): void { $o->l=$v; });
+    $ticket = $d->freigeben(30,RoboHubEurekaDock::BESTAETIGUNG,RoboHubEurekaDock::VOR_ORT_BESTAETIGUNG)['freigabe'];
+    return [$d,$o,$ticket];
+}
+foreach (['wanduhr','monoton','rückwärts','neustart','genehmigtBis','genehmigtMonotonBis'] as $fall) {
+    foreach (['vor Versuch','vor I/O'] as $phase) {
+        $tests['Ausnahme: Ablauf ' . $fall . ' ' . $phase] = function () use ($fall,$phase): void {
+            [$d,$o,$ticket] = dockZeitFixture(); $calls = 0;
+            $aendern = function () use ($o,$fall): void {
+                if ($fall === 'wanduhr') { $o->k['jetzt'] += 30; }
+                if ($fall === 'monoton') { $o->k['monoton'] += 30000; }
+                if ($fall === 'rückwärts') { $o->k['monoton']--; }
+                if ($fall === 'neustart') { $o->k['boot'] = 'andere-laufzeit'; }
+                if ($fall === 'genehmigtBis') { $o->l['genehmigtBis'] = $o->k['jetzt']; }
+                if ($fall === 'genehmigtMonotonBis') { $o->l['genehmigtMonotonBis'] = $o->k['monoton']; }
+            };
+            if ($phase === 'vor Versuch') { $aendern(); }
+            $transport = function ($p,$t,$b,$pruefen) use ($phase,$aendern,&$calls): array {
+                if ($phase === 'vor I/O') { $aendern(); }
+                $pruefen(true); $calls++; return antwort();
+            };
+            gesperrt(fn() => $d->ausfuehren($ticket,$transport));
+            sicher($calls === 0);
+        };
+    }
+}
+foreach ([120,121] as $alter) {
+    $tests['Ausnahme: Frischegrenze exakt ' . $alter] = function () use ($alter): void {
+        [$d,$o,$ticket] = dockZeitFixture();
+        $o->k['cacheZeit'] = $o->k['geraet']['verbindungEmpfangen'] = $o->k['geraet']['stand']['zeit'] = $o->k['jetzt']-$alter;
+        $transport = function ($p,$t,$b,$pruefen): array { $pruefen(true); return antwort(); };
+        if ($alter === 120) { sicher($d->ausfuehren($ticket,$transport)['verbindung'] === 'unbekannt'); }
+        else { gesperrt(fn() => $d->ausfuehren($ticket,$transport)); }
+    };
+}
+foreach ([false,true] as $ausnahme) {
+foreach ([401,429,500,302,'timeout','invalid','cloud-timeout'] as $fall) {
+    $tests['Kein Retry/Refresh ' . ($ausnahme ? 'mit Ausnahme ' : '') . 'bei ' . $fall] = function () use ($fall,$ausnahme): void {
+        [$k,$t] = dockKonto($ausnahme); dockGenehmigt($k,$ausnahme); $ticket = dockTicket($k,$ausnahme);
         $t->antwort = match($fall) {
             'timeout' => fn() => throw new RuntimeException('fixture-secret'),
             'invalid' => ['status'=>200,'response'=>'invalid'],
+            'cloud-timeout' => antwort(null,200,'0080005'),
             default => antwort(null,$fall),
         };
         gesperrt(fn() => $k->EurekaDockTesten($ticket));
@@ -93,6 +285,7 @@ foreach ([401,429,500,302,'timeout','invalid'] as $fall) {
         gesperrt(fn() => dockTicket($k)); sicher(count($t->calls) === 1);
         if ($fall === 429) { sicher($k->attrs['WarteBis'] > time()); }
     };
+}
 }
 $tests['Widerruf und Attributrollback bleiben geschlossen'] = function (): void {
     [$k,$t] = dockKonto(); dockGenehmigt($k); $ticket = dockTicket($k); $alt = $k->attrs['EurekaDockVersuch'];
@@ -126,12 +319,12 @@ foreach (['fehlt','abgelaufen','monoton','B8-Puffer'] as $fall) {
 foreach ([0,61] as $dauer) {
     $tests['Ticketdauer ' . $dauer] = function () use ($dauer): void {
         [$k,$t] = dockKonto(); dockGenehmigt($k);
-        gesperrt(fn() => $k->EurekaDockFreigeben($dauer,RoboHubEurekaDock::BESTAETIGUNG)); sicher($t->calls === []);
+        gesperrt(fn() => $k->EurekaDockFreigeben($dauer,RoboHubEurekaDock::BESTAETIGUNG,'')); sicher($t->calls === []);
     };
 }
 $tests['B8-Bestätigung und falsches Ticket gesperrt'] = function (): void {
     [$k,$t] = dockKonto(); dockGenehmigt($k);
-    gesperrt(fn() => $k->EurekaDockFreigeben(60,RoboHubEurekaDiagnose::BESTAETIGUNG));
+    gesperrt(fn() => $k->EurekaDockFreigeben(60,RoboHubEurekaDiagnose::BESTAETIGUNG,''));
     $ticket = dockTicket($k); gesperrt(fn() => $k->EurekaDockTesten(str_repeat('b',64))); sicher($t->calls === []);
 };
 foreach (['Attribut','Buffer'] as $speicher) {
@@ -160,15 +353,23 @@ $tests['Reentranz und Widerruf unmittelbar vor Transport'] = function (): void {
     }
 };
 $tests['Kein Dock-Import über ForwardData und keine normalen Befehle freigegeben'] = function (): void {
-    [$k,$t] = dockKonto();
-    foreach (['EurekaDockBereitstellen','EurekaDockTesten'] as $action) {
+    [$k,$t] = dockKonto(true); dockGenehmigt($k,true); $ticket = dockTicket($k,true);
+    foreach (['EurekaDockBereitstellen','EurekaDockFreigeben','EurekaDockTesten'] as $action) {
         $r = json_decode($k->ForwardData(json_encode(['Aktion'=>$action,'Geraet'=>'offline-e20'])),true);
         sicher($r['ok'] === false);
     }
-    foreach (['start','pause','stopp','station','orten'] as $cmd) {
+    foreach (['start','pause','resume','stopp','station','orten'] as $cmd) {
         gesperrt(fn() => (new RoboHubEureka())->befehl([],[],$cmd,[]));
     }
-    sicher($t->calls === [] && $k->GetBuffer('EurekaDockLaufzeitfreigabe') === '');
+    // Auch der vorbereitete Planer erhält keine Ausnahme aus einem Dockticket.
+    $g = json_decode($k->attrs['Geraete'],true)[0];
+    $g['stand'] = json_decode($k->attrs['Schnappschuss'],true)[$g['id']]['p'];
+    $zuordnung = [['identifikation'=>RoboHubEurekaProtokoll::identifikation($g),
+        'familie'=>RoboHubEurekaProtokoll::FAMILIE,'beleg'=>'Offline-Test']];
+    foreach (['start','pause','station'] as $cmd) {
+        gesperrt(fn() => RoboHubEurekaBefehlsweg::vorbereiten($g,$cmd,[],$zuordnung,time()));
+    }
+    sicher($t->calls === []);
 };
 // Ed25519-Systemgrenze als Double, keine Schlüssel/Signaturen erzeugen oder importieren.
 $source = file_get_contents(__DIR__.'/../../libs/RoboHubEurekaGenehmigung.php');
@@ -183,6 +384,28 @@ $tests['Signaturzweck, Befehl, Ziel, Zeit und Laufzeit strikt getrennt'] = funct
     $doc = fn($v) => json_encode(['nutzlast'=>base64_encode(json_encode($v)),'signatur'=>base64_encode(str_repeat('x',64))]);
     $pk = base64_encode(str_repeat('x',32)); $v = DockVerifierDouble\RoboHubEurekaGenehmigung::class;
     sicher($v::dockPruefen($doc($g),$pk,$boot,$now) === $g);
+    foreach ([true,false] as $einwilligung) {
+        $v2 = array_replace($g,['zweck'=>'robohub/eureka/dock/runtime/v2']);
+        $v2['ausnahmeVerbindungUnbekannt'] = $einwilligung;
+        sicher($v::dockPruefen($doc($v2),$pk,$boot,$now) === $v2);
+        gesperrt(fn() => $v::pruefen($doc($v2),$pk,$boot,$now));
+        gesperrt(fn() => RoboHubEurekaGenehmigung::dockPruefen($doc($v2),$pk,$boot,$now));
+        foreach ([null,1,'true',[], 'fehlt'] as $wert) {
+            $bad = array_replace($v2,['ausnahmeVerbindungUnbekannt'=>$wert]);
+            if ($wert === 'fehlt') { unset($bad['ausnahmeVerbindungUnbekannt']); }
+            gesperrt(fn() => $v::dockPruefen($doc($bad),$pk,$boot,$now));
+        }
+        foreach (['zweck'=>'robohub/eureka/b8/runtime/v2','konto'=>1,'instanz'=>1,
+            'erwartet'=>'other','befehl'=>RoboHubEurekaDiagnose::BEFEHL,'bis'=>$now+61] as $feld=>$wert) {
+            $bad = array_replace($v2,[$feld=>$wert]);
+            gesperrt(fn() => $v::dockPruefen($doc($bad),$pk,$boot,$now));
+        }
+        $GLOBALS['dockSignaturGueltig'] = false;
+        gesperrt(fn() => $v::dockPruefen($doc($v2),$pk,$boot,$now));
+        unset($GLOBALS['dockSignaturGueltig']);
+    }
+    // v1 kann niemals durch ein angehängtes Feld zur Ausnahmeeinwilligung werden.
+    gesperrt(fn() => $v::dockPruefen($doc(array_merge($g,['ausnahmeVerbindungUnbekannt'=>true])),$pk,$boot,$now));
     gesperrt(fn() => $v::pruefen($doc($g),$pk,$boot,$now));
     foreach (['zweck'=>'robohub/eureka/b8/runtime/v2','befehl'=>RoboHubEurekaDiagnose::BEFEHL,
         'konto'=>1,'instanz'=>1,'modell'=>'other','cloudGeraetId'=>'','erwartet'=>'other',

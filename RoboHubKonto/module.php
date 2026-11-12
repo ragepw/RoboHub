@@ -719,7 +719,10 @@ class RoboHubKonto extends IPSModule
     public function EurekaDockVorpruefen(): string
     {
         return $this->mitEurekaDockSperre(function (RoboHubEurekaDock $d): string {
-            RoboHubEurekaDock::pruefen($this->eurekaDockKontext());
+            $verbindung = RoboHubEurekaDock::pruefen($this->eurekaDockKontext(), true);
+            if ($verbindung === 'unbekannt') {
+                return 'Eureka: Verbindung unbekannt; lokale Dock-Vorprüfung bedingt bestanden. Separate signierte Ausnahmeeinwilligung und unmittelbare Vor-Ort-Bestätigung erforderlich; keine Freigabe erteilt.';
+            }
             return 'Eureka: Lokale Dock-Vorprüfung bestanden; keine Freigabe erteilt.';
         });
     }
@@ -771,11 +774,11 @@ class RoboHubKonto extends IPSModule
         }
     }
 
-    public function EurekaDockFreigeben(int $sekunden, string $bestaetigung): string
+    public function EurekaDockFreigeben(int $sekunden, string $bestaetigung, string $vorOrtBestaetigung): string
     {
         $this->eurekaDockImportAdministratorPruefen();
         return $this->mitEurekaDockSperre(fn(RoboHubEurekaDock $d): string =>
-            json_encode($d->freigeben($sekunden, $bestaetigung), JSON_THROW_ON_ERROR));
+            json_encode($d->freigeben($sekunden, $bestaetigung, $vorOrtBestaetigung), JSON_THROW_ON_ERROR));
     }
 
     public function EurekaDockWiderrufen(): string
@@ -925,6 +928,7 @@ class RoboHubKonto extends IPSModule
             'region' => 'eu', 'kontoname' => $this->ReadPropertyString('Konto'),
             'jetzt' => time(), 'monoton' => intdiv(hrtime(true), 1000000),
             'boot' => $start . ':' . $this->GetBuffer('EurekaDockLaufzeit'),
+            'benutzer' => IPS_GetLoggedInUser(),
             'revision' => $this->ReadAttributeString('BuendelRevision'), 'buendel' => $b,
             'warteBis' => $this->ReadAttributeInteger('WarteBis'),
             'cacheZeit' => $this->ReadAttributeInteger('GeraeteStand'), 'geraet' => $g];
