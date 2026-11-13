@@ -34,6 +34,22 @@ $GLOBALS['NEXT'] = 60000;
 $GLOBALS['LOG'] = [];
 $GLOBALS['INST'] = [];     // InstanceID => Modulobjekt
 
+// Lokale Profildoubles: echte Assoziationen und Schrittweite für WebFront prüfen.
+function IPS_VariableProfileExists(string $name): bool { return isset($GLOBALS['PROFILES'][$name]); }
+function IPS_CreateVariableProfile(string $name, int $type): bool {
+    $GLOBALS['PROFILES'][$name] = ['ProfileType' => $type, 'Associations' => []]; return true;
+}
+function IPS_GetVariableProfile(string $name): array { return $GLOBALS['PROFILES'][$name]; }
+function IPS_SetVariableProfileValues(string $name, float $min, float $max, float $step): bool {
+    $GLOBALS['PROFILES'][$name] = array_merge($GLOBALS['PROFILES'][$name], ['MinValue' => $min, 'MaxValue' => $max, 'StepSize' => $step]); return true;
+}
+function IPS_SetVariableProfileAssociation(string $name, $value, string $caption, string $icon, int $color): bool {
+    $a = &$GLOBALS['PROFILES'][$name]['Associations'];
+    $a = array_values(array_filter($a, fn($v) => $v['Value'] !== $value));
+    if ($caption !== '' || $icon !== '') { $a[] = ['Value' => $value, 'Name' => $caption, 'Icon' => $icon, 'Color' => $color]; }
+    return true;
+}
+
 function IPS_GetKernelStartTime(): int { static $start; return $GLOBALS['KERNEL_START'] ?? ($start ??= time() - 3600); }
 function IPS_GetKernelRunlevel(): int { return $GLOBALS['KERNEL_RUNLEVEL'] ?? KR_READY; }
 function IPS_Sleep(int $ms): void {}

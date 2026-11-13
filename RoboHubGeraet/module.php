@@ -156,8 +156,14 @@ class RoboHubGeraet extends IPSModule
     public function RequestAction($Ident, $Value)
     {
         if (in_array($Ident, ['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'], true)) {
-            if (!$this->istEurekaE20() || $this->ReadPropertyBoolean('Deaktiviert') || !is_int($Value)) {
-                throw new Exception('Eureka: Einstellung für dieses Gerät oder diesen Wert gesperrt.');
+            if (!$this->istEurekaE20()) {
+                throw new Exception('Eureka: Einstellung erfordert Modell E20 Evo Plus und ein verbundenes Eureka-Konto.');
+            }
+            if ($this->ReadPropertyBoolean('Deaktiviert')) {
+                throw new Exception('Eureka: Geräteinstanz ist deaktiviert.');
+            }
+            if (!is_int($Value)) {
+                throw new Exception('Eureka: Auswahlwert muss eine Ganzzahl sein.');
             }
             $erlaubt = match ($Ident) {
                 'EurekaReinigungsart' => [0, 2],
@@ -1238,19 +1244,42 @@ class RoboHubGeraet extends IPSModule
         $aktiv = $this->istEurekaE20();
         $position = 20;
         foreach ([
-            'EurekaReinigungsart' => ['Reinigungsart (nächster Auftrag)', [0 => 'Nur saugen', 2 => 'Saugen und wischen']],
+            'EurekaReinigungsart' => ['Reinigungsart (nächster Auftrag)', [0 => 'Nur Saugen', 2 => 'Saugen und Wischen']],
             'EurekaStartSaugstufe' => ['Saugleistung (nächster Auftrag)', [1 => 'Sanft', 2 => 'Standard', 3 => 'Stark']],
             'EurekaStartWasserstufe' => ['Wassermenge (nächster Auftrag)', [0 => 'Aus', 1 => 'Niedrig', 2 => 'Standard', 3 => 'Hoch']],
         ] as $ident => [$name, $optionen]) {
             $neu = !$this->hatVariable($ident);
             if (!$aktiv && $neu) { continue; }
             $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER,
-                $this->presEnum([-1 => 'Bitte auswählen'] + $optionen), $position++, $aktiv);
+                $aktiv ? $this->eurekaAuswahlProfil($ident, [-1 => 'Bitte auswählen'] + $optionen) : '', $position++, $aktiv);
             if ($aktiv) {
                 if ($neu) { $this->SetValue($ident, -1); }
                 $this->EnableAction($ident);
             }
         }
+    }
+
+    /** Klassisches WebFront: Integer-Assoziationen ohne freie Zahleneingabe. */
+    private function eurekaAuswahlProfil(string $ident, array $optionen): string
+    {
+        $profil = 'RoboHub.' . $ident;
+        if (!IPS_VariableProfileExists($profil)) {
+            IPS_CreateVariableProfile($profil, VARIABLETYPE_INTEGER);
+        }
+        if (IPS_GetVariableProfile($profil)['ProfileType'] !== VARIABLETYPE_INTEGER) {
+            throw new Exception('Eureka: Auswahlprofil muss vom Typ Integer sein.');
+        }
+        // Eigene Modulprofile auf die belegte Auswahl begrenzen, auch nach Updates.
+        foreach (IPS_GetVariableProfile($profil)['Associations'] as $assoziation) {
+            if (!array_key_exists((int)$assoziation['Value'], $optionen)) {
+                IPS_SetVariableProfileAssociation($profil, $assoziation['Value'], '', '', -1);
+            }
+        }
+        IPS_SetVariableProfileValues($profil, min(array_keys($optionen)), max(array_keys($optionen)), 0);
+        foreach ($optionen as $wert => $text) {
+            IPS_SetVariableProfileAssociation($profil, $wert, $text, '', -1);
+        }
+        return $profil;
     }
 
     private function presEnum(array $map): array

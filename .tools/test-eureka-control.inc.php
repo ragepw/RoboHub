@@ -61,6 +61,10 @@ try {
     $cg->props['GeraetID'] = 'offline-e20'; $cg->props['Modell'] = 'E20 Evo Plus';
     // Vorhandene Variablen-ID nachbilden, keine zusätzliche Steuerungsvariable.
     $GLOBALS['OBJ'][22284] = ['ident' => 'Befehl', 'parent' => 22708, 'type' => 1, 'value' => 0, 'action' => true, 'name' => 'Befehl'];
+    // Gemeldete Bestandsvariable: Darstellung wird aktualisiert, ID bleibt erhalten.
+    $GLOBALS['OBJ'][41381] = ['ident' => 'EurekaStartSaugstufe', 'parent' => 22708,
+        'type' => VARIABLETYPE_INTEGER, 'value' => -1, 'action' => true, 'name' => 'Saugleistung (nächster Auftrag)',
+        'pres' => ['PRESENTATION' => VARIABLE_PRESENTATION_ENUMERATION, 'OPTIONS' => '[]']];
     $cg->ApplyChanges();
     $token = 'offline.' . rtrim(strtr(base64_encode(json_encode(['exp' => time() + 3600])), '+/', '-_'), '=') . '.fixture';
     $bundle = ['region' => 'eu', 'access_token' => $token, 'refresh_token' => 'offline'];

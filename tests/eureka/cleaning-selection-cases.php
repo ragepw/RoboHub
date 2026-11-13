@@ -7,19 +7,40 @@ $reset('stop');
 $cg->SetValue('EurekaReinigungsart', -1);
 $cg->ApplyChanges();
 check('ApplyChanges sendet keine Befehle', $ct->reads === [] && $ct->posts === []);
-foreach (['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'] as $ident) {
+$auswahlOptionen = [
+    'EurekaReinigungsart' => [-1 => 'Bitte auswählen', 0 => 'Nur Saugen', 2 => 'Saugen und Wischen'],
+    'EurekaStartSaugstufe' => [-1 => 'Bitte auswählen', 1 => 'Sanft', 2 => 'Standard', 3 => 'Stark'],
+    'EurekaStartWasserstufe' => [-1 => 'Bitte auswählen', 0 => 'Aus', 1 => 'Niedrig', 2 => 'Standard', 3 => 'Hoch'],
+];
+foreach ($auswahlOptionen as $ident => $optionen) {
     $v = $GLOBALS['OBJ'][IPS_GetObjectIDByIdent($ident, 22708)];
-    check('Native aktive Auswahl ' . $ident, $v['action'] === true && $v['type'] === VARIABLETYPE_INTEGER
-        && $v['pres']['PRESENTATION'] === VARIABLE_PRESENTATION_ENUMERATION
-        && count(json_decode($v['pres']['OPTIONS'], true)) > 2);
+    $profil = IPS_GetVariableProfile($v['pres']);
+    $texte = [];
+    foreach ($profil['Associations'] as $a) { $texte[$a['Value']] = $a['Name']; }
+    check('WebFront: aktive Integer-Assoziationen mit deutschen Texten ' . $ident,
+        $v['action'] === true && $v['type'] === VARIABLETYPE_INTEGER
+        && $v['pres'] === 'RoboHub.' . $ident && $profil['ProfileType'] === VARIABLETYPE_INTEGER
+        && $profil['StepSize'] === 0.0 && $texte === $optionen);
 }
+check('Bestandsvariable 41381 bleibt an Saugstufe in Instanz 22708 gebunden',
+    IPS_GetObjectIDByIdent('EurekaStartSaugstufe', 22708) === 41381);
+$webfrontDouble(41381, 3);
+check('Integer 3 über Variablenaktion akzeptiert, auch ohne Reinigungsart',
+    $cg->GetValue('EurekaStartSaugstufe') === 3 && $cg->GetValue('EurekaReinigungsart') === -1
+    && $cg->GetValue('EurekaStartWasserstufe') === -1 && $ct->reads === [] && $ct->posts === []);
+// Ein veralteter Profileintrag darf keine unbelegte Auswahl anbieten.
+IPS_SetVariableProfileAssociation('RoboHub.EurekaStartSaugstufe', 5, 'Unbelegt', '', -1);
+$cg->ApplyChanges();
+check('Profilaktualisierung entfernt unbelegte Werte und erhält die Auswahl',
+    count(IPS_GetVariableProfile('RoboHub.EurekaStartSaugstufe')['Associations']) === 4
+    && $cg->GetValue('EurekaStartSaugstufe') === 3 && $ct->reads === [] && $ct->posts === []);
 foreach ([0, 2] as $art) {
     foreach ([1, 2, 3] as $fan) {
         foreach ($art === 0 ? [0] : [1, 2, 3] as $water) {
             $reset('stop');
-            $cg->RequestAction('EurekaReinigungsart', $art);
-            $cg->RequestAction('EurekaStartSaugstufe', $fan);
-            $cg->RequestAction('EurekaStartWasserstufe', $water);
+            $webfrontDouble(IPS_GetObjectIDByIdent('EurekaReinigungsart', 22708), $art);
+            $webfrontDouble(41381, $fan);
+            $webfrontDouble(IPS_GetObjectIDByIdent('EurekaStartWasserstufe', 22708), $water);
             $cg->ApplyChanges();
             check('Auswahl/ApplyChanges bleiben lokal und persistent', $ct->reads === [] && $ct->posts === []
                 && $cg->GetValue('EurekaStartWasserstufe') === $water);
@@ -56,10 +77,39 @@ foreach ([[0, 2], [2, 0], [1, 2], [-1, 0]] as [$art, $water]) {
     $cg->SetValue('EurekaStartSaugstufe', 2); $cg->RequestAction('Befehl', 1);
     check('Auch direkt manipulierte Kombination sperrt Start', $ct->posts === []);
 }
-$reset('stop'); $cg->props['Modell'] = 'anderes Modell'; $abgewiesen = false;
-try { $cg->RequestAction('EurekaReinigungsart', 0); } catch (Exception $e) { $abgewiesen = true; }
-check('Modellgebundene Auswahl', $abgewiesen && $ct->posts === []);
-$cg->props['Modell'] = 'E20 Evo Plus';
+foreach (['modell', 'konto', 'hersteller', 'deaktiviert', 'typ'] as $fall) {
+    foreach (['EurekaReinigungsart' => 0, 'EurekaStartSaugstufe' => 3, 'EurekaStartWasserstufe' => 0] as $ident => $wert) {
+        $reset('stop'); $cg->SetValue('EurekaReinigungsart', 0);
+        $vorher = array_map(fn($i) => $cg->GetValue($i), array_keys($auswahlOptionen));
+        if ($fall === 'modell') { $cg->props['Modell'] = 'anderes Modell'; }
+        if ($fall === 'konto') { $cg->parent = null; }
+        if ($fall === 'hersteller') { $ck->props['Hersteller'] = 'dreame'; }
+        if ($fall === 'deaktiviert') { $cg->props['Deaktiviert'] = true; }
+        $meldung = '';
+        try { $cg->RequestAction($ident, $fall === 'typ' ? (string)$wert : $wert); }
+        catch (Exception $e) { $meldung = $e->getMessage(); }
+        $erwartet = match ($fall) {
+            'deaktiviert' => 'Eureka: Geräteinstanz ist deaktiviert.',
+            'typ' => 'Eureka: Auswahlwert muss eine Ganzzahl sein.',
+            default => 'Eureka: Einstellung erfordert Modell E20 Evo Plus und ein verbundenes Eureka-Konto.',
+        };
+        check('Auswahl sicher gesperrt mit genauer Ursache ' . $ident . '/' . $fall,
+            $meldung === $erwartet && $vorher === array_map(fn($i) => $cg->GetValue($i), array_keys($auswahlOptionen))
+            && $ct->reads === [] && $ct->posts === []);
+        $cg->props['Modell'] = 'E20 Evo Plus'; $ck->props['Hersteller'] = 'eureka';
+    }
+}
+$reset('stop');
+foreach (array_keys($auswahlOptionen) as $ident) {
+    foreach ([-1, 99, '3', 3.0, true, null, []] as $wert) {
+        $vorher = array_map(fn($i) => $cg->GetValue($i), array_keys($auswahlOptionen));
+        $abgewiesen = false;
+        try { $cg->RequestAction($ident, $wert); } catch (Exception $e) { $abgewiesen = true; }
+        check('Ungültiger Wert/Typ ohne Nebenwirkung ' . $ident . '/' . json_encode($wert),
+            $abgewiesen && $vorher === array_map(fn($i) => $cg->GetValue($i), array_keys($auswahlOptionen))
+            && $ct->reads === [] && $ct->posts === []);
+    }
+}
 $r = (new RoboHubEureka())->normalisiere('E20 Evo Plus', observedE20Shadows()[0]['shadow']);
 check('Beobachtete Shadow-Istwerte getrennt angezeigt', $r['werte']['Saugstufe'] === '3'
     && $r['werte']['Wassermenge'] === '2' && $r['werte']['Reinigungsmodus'] === 'room_cleaning');

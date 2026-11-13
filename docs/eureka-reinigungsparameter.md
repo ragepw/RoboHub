@@ -72,9 +72,9 @@ die normale Hauptbedienung nutzt ihn nicht. RoboHub lässt Byte 12 auf 00.
 ## Native Symcon-Bedienung
 
 `RoboHubGeraet` legt bei Modell E20 Evo Plus und verbundenem Eureka-Konto drei
-Integer-Variablen mit nativer Aufzählung und RequestAction an:
+Integer-Variablen mit nativen Assoziationsprofilen und RequestAction an:
 
-- `EurekaReinigungsart`: Nur saugen / Saugen und wischen.
+- `EurekaReinigungsart`: Nur Saugen / Saugen und Wischen.
 - `EurekaStartSaugstufe`: Sanft / Standard / Stark.
 - `EurekaStartWasserstufe`: Aus / Niedrig / Standard / Hoch.
 
@@ -161,3 +161,42 @@ Netzwerk-Namespace, inklusive bestehender Offline-Suite, PHP-Lint und
 Netzwerk-Doubles verwenden ausschließlich isoliertes Loopback.
 Reale Parameterakzeptanz, Moppmechanik und native produktive Symcon-Laufzeit
 bleiben ungeprüft. Keine produktive Bereitstellung Bestandteil dieses Auftrags.
+
+## Korrektur für das klassische WebFront (13.11.2026)
+
+Die bisherige Registrierung verwendete ausschließlich die neue Darstellung
+`VARIABLE_PRESENTATION_ENUMERATION` mit JSON-Optionen. Für die gemeldete
+Zahlenfeldeingabe im klassischen WebFront werden die drei Variablen jetzt über
+`MaintainVariable` mit eigenen Integer-Profilen `RoboHub.<Ident>` registriert.
+Die Profile enthalten die oben genannten deutschen Assoziationen einschließlich
+-1 = „Bitte auswählen“ und Schrittweite 0. Das entspricht der dokumentierten
+[WebFront-Aufzählung mit Legacy-Profil](https://www.symcon.de/de/service/dokumentation/komponenten/objekt-darstellung/aufzaehlung/).
+Bestehende Variablen-IDs und lokale Werte bleiben bei der Profilzuweisung erhalten;
+es entstehen keine Ersatzvariablen und keine automatischen Startwerte.
+Nicht belegte Assoziationen dieser Modulprofile werden beim Aktualisieren entfernt.
+
+| RequestAction-Ident | Zulässige Integerwerte | Bindung |
+|---|---|---|
+| `EurekaReinigungsart` | 0 = Nur Saugen, 2 = Saugen und Wischen | Geräteinstanz |
+| `EurekaStartSaugstufe` | 1 = Sanft, 2 = Standard, 3 = Stark | gemeldete Variable 41381 unter Instanz 22708 |
+| `EurekaStartWasserstufe` | 0 = Aus im Saugmodus; 1–3 = Niedrig/Standard/Hoch im Kombimodus | Geräteinstanz |
+
+Die gemeldete Ablehnung von Integer 3 ist mit Modell `E20 Evo Plus`, verbundenem
+Eureka-Konto und aktiver Geräteinstanz offline nicht reproduzierbar, auch ohne
+gewählte Reinigungsart. Der Wert gehört schon im Stand 9cfa39e zur erlaubten Liste.
+Die gemeldete allgemeine Ausnahme stammt aus der vorgelagerten Prüfung von
+Modell/Kontozuordnung, Deaktivierung oder Werttyp; sie stammt nicht aus der
+Werteliste oder dem Shadow. Diese Ursachen werden jetzt getrennt ausgegeben.
+Ohne lokalen Laufzeitnachweis wird keine davon als tatsächliche Live-Ursache
+behauptet und keine Sicherheitsprüfung gelockert. Für die weitere Eingrenzung
+reichen die genaue neue Meldung beziehungsweise ein lokaler, rein lesender
+Nachweis von Modellproperty, Kontoverbindung/Hersteller, Deaktivierung, Variablen-
+Ident/Standardaktion und übergebenem Werttyp; kein Cloud-Abruf ist erforderlich.
+
+Die Offline-Fälle bilden Variable 41381 als vorhandene Integer-Variable nach,
+prüfen alle zwölf Kombinationen über die Variablenaktion, die exakten deutschen
+Profiltexte, Profilaktualisierung, Integer 3 ohne Reinigungsart, sämtliche
+vorgelagerten Sperren und ungültige Typen/Werte ohne lokale Nebenwirkungen.
+Auswahländerungen bleiben ohne Konto-/Cloud-Aufruf. Pause, Fortsetzen, Dock und
+die vorhandenen B8-/Diagnoseänderungen werden nicht geändert.
+Ein realer WebFront-Renderingtest bleibt außerhalb dieser Offline-Umgebung offen.
