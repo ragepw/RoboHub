@@ -1,13 +1,114 @@
 # E20 Evo Plus: reguläre manuelle IP-Symcon-Bedienung
 
-Stand 12.11.2026, Branch `feature/eureka-e20-evo-plus`. Ausschließlich lokal
+Stand 13.11.2026, Branch `feature/eureka-e20-evo-plus`. Ausschließlich lokal
 entwickelt und mit Transportdoubles geprüft. Keine Cloudaufrufe, produktiven
 Objektänderungen, Roboterbefehle, Bereitstellung oder Pushs.
-Die Quellcodefreigabe und der Commit erfolgen ausschließlich lokal.
+Die Refresh-Korrektur wird separat lokal committet; Push und Deployment erfolgen nicht.
 Dieses Dokument ersetzt für den normalen Steuerungsweg die älteren Aussagen
 in [Produktivvorbereitung](eureka-produktivvorbereitung.md) und
 [Steuerungsbericht](eureka-steuerung.md). Die separaten B8-/Dock-Genehmigungen
 werden weder ersetzt noch erweitert.
+
+## Korrektur: reguläre Bedienung ohne vorgeschaltetes Suchen
+
+Ausgangsbefund laut Betreiber am zuletzt installierten Pi-Stand `b40f254`:
+Pause funktionierte nach manueller Aktualisierung, Start/Fortsetzen wurde
+anschließend mit „Eureka: Aktuelle Geräteliste erforderlich.“ abgelehnt;
+der Roboter blieb pausiert. WebFront und RequestAction erreichten das Modul.
+Dieser Befund wurde hier ausschließlich am Quellcode und mit Doubles untersucht.
+
+Die vorhandene Suchkette ist `RoboHubKonfigurator::Suchen()` →
+`ROBOHUB_GeraeteSuchen()` → `RoboHubKonto::ladeGeraete()` →
+`RoboHubEureka::geraete()` → `GET /app/devices?version=1&isShared=false`.
+Der Treiber übernimmt die vollständigen Rohmetadaten einschließlich `connected`
+und setzt je Gerät `verbindungEmpfangen`; das Konto speichert `Geraete` und
+`GeraeteStand`. Der bisherige Steuerweg prüfte diese beiden Zeiten auf höchstens
+120 Sekunden, lud eine abgelaufene Liste aber nicht selbst nach.
+
+Die native Konto-Instanz verwendet nun direkt dieselbe `ladeGeraete()`-Logik:
+
+1. Der normale Treiber verlangt weiterhin manuelle Bedienung und die feste
+   individuelle Gerätefreigabe. Unbekannte Befehle werden vor der Vorbereitung
+   verworfen. Die anfängliche Kontoanfrage löst keine ungesperrte Gerätesuche aus.
+2. Unter `RoboHubEureka_Geraet_<Hash>` prüft das Konto zunächst Konto 45174,
+   EU-Sitzung, Cloud-Wartezeit, Gerät 22708 und Variable 22284. Vorhandene
+   widersprüchliche Geräte-/Shadowidentitäten bleiben gesperrt.
+3. Sind Listenstand oder Verbindungsempfang älter als 120 Sekunden, fehlen sie
+   oder sind sie ungültig, erfolgt genau ein Listenabruf. Auch ein leerer,
+   syntaktisch gültiger Cache kann so ohne Konfigurator gefüllt werden.
+   Nach dem Abruf werden Sitzung, Bindung und Modell vollständig neu gelesen.
+4. Ein abgelaufener/fehlender Shadow oder eine fehlende aktuelle Sitzungs-/
+   Laufzeitbindung führt zu genau einem Einzelziel-GET über den bestehenden
+   `zustandMitBlockSperre()`-Pfad. Bei vollständig frischen, unverbrauchten
+   Daten erfolgen keine zusätzlichen GETs.
+5. Nach einer von der Cloud angenommenen Bedienaktion kann die nächste
+   **andere** Bedienaktion den verbrauchten Shadow einmal neu lesen. Dafür
+   müssen der gespeicherte Verbrauch und der unter derselben Gerätesperre
+   geschriebene laufzeitgebundene Erfolgsmarker exakt zum aktuellen Snapshot
+   passen. So wird nach Pause beim anschließenden
+   Start der Zustand `pause` nachgelesen und Continue vorbereitet. Ein Fehler
+   oder unklarer Ausgang erzeugt keinen Erfolgsmarker. Derselbe Befehl erhält
+   keinen solchen Folgeabruf; vorhandene Verbrauchssperren bleiben bestehen.
+6. Erst danach folgen sämtliche bisherigen Online-, Zustands-, Identitäts-,
+   Parameter- und Verbrauchsprüfungen. Alle Prüfungen nach dem Plan und direkt
+   vor I/O bleiben rein lokal; Frischeverlust führt zur Ablehnung.
+
+Die Konto-Lesesemaphore `RoboHubEureka_Lesen_<Konto>` schützt gemeinsame
+Listen-/Shadowpfade auch gegen gleichzeitiges Suchen und Polling. Ein belegter
+Zugriff wird ohne Warteschlange abgewiesen. Sperrfolge bei der Bedienung:
+Gerät → Lesen → gegebenenfalls kurze Bündel-Attributsperre; beim vorbereitenden
+Sitzungserneuern und beim bisherigen GET-401-Pfad gilt weiterhin Refresh →
+Bündel. Die neuen Lese-/Steueraufrufe halten keine Bündel-Attributsperre über
+einen Cloud-Aufruf hinweg; der separate bestehende B8-Diagnosevertrag bleibt erhalten.
+Die Bedienvorbereitung wiederholt auch bei GET-401 keinen Leseabruf; sie bricht
+sicher ab. Die bisherige zentrale Tokenrotation vor der Bedienung sowie die
+einmalige GET-401-Rotation normaler Such-/Statusabrufe bleiben erhalten.
+Eine während des Leseabrufs fremd geänderte Sitzung wird nicht übernommen.
+
+Nach einem Refresh-/Prüffehler gilt für weitere Bedien-Refreshs eine lokale
+Abkühlzeit von fünf Sekunden; HTTP 429 übernimmt außerdem die bestehende
+Cloud-Wartezeit. Das Konto protokolliert Quelle und konkreten sicheren
+Fehlergrund, etwa HTTP-Status, ungültige Antwort, Gerätebindung oder belegten
+Lesezugriff. Unbekannte Transportausnahmen werden ohne Cloud-Freitext oder
+Kennungen protokolliert. Es gibt keine Schleife, Warteschlange oder zusätzliche
+Timeraktion. Steuer-POSTs bleiben auf einen Versuch pro Anforderung begrenzt;
+HTTP-, Transport- und Parserfehler lösen keinen automatischen Neuversand aus.
+
+Verbleibende Grenzen: Ein frisch empfangener, cloudseitig alter Shadow ist
+ohne bestätigte Gerätezeit weiterhin nicht erkennbar. Cloudannahme beweist
+keine reale Bewegung. Ein unmittelbar nach Pause gelesener Shadow kann noch
+`cleaning` melden; dann wird Start sicher abgelehnt, ohne Nachleseschleife.
+Die tatsächliche Cloud-/Roboterreaktion und IP-Symcon-Semaphoren müssen später
+separat und beaufsichtigt am Pi geprüft werden. Dieser Auftrag enthält weder
+eine Bereitstellung noch einen Live-Test.
+
+### Abschließende Offlineprüfung dieser Korrektur
+
+Der isolierte Commit-Inhalt besteht `bash tests/eureka/run-control-offline.sh`
+mit Exitcode 0. Der Runner läuft mit `bwrap --unshare-net`; reale Cloudziele sind
+nicht erreichbar. Lokale native Transportgegenproben nutzen ausschließlich
+isoliertes Loopback, alle Bedienaktionen verwenden Transportdoubles.
+
+`tests/eureka/control-refresh-cases.php` ergänzt 124 native Prüfaussagen:
+frische/alte/leere Liste, altes Verbindungsempfangsdatum, alter Shadow,
+Sitzungs-/Laufzeitwechsel bei expliziter Bedienung, HTTP 401/429/500,
+Parser-/Transportfehler und Abkühlzeit; falsche IDs, Offline-/Modell-/
+Shadowwidersprüche und während GET geänderte Sitzungs-/Instanzbindung;
+Pause → Fortsetzen ohne vorgeschaltete Suche oder Statusaktualisierung;
+verzögerter Cloudshadow nach Pause; parallele Bedienung/Suche/Polling während
+beider GET-Arten; keine Doppelübertragung und kein später Refresh vor I/O.
+Der vorhandene Prüfstand bildet Semaphoren dafür mit tatsächlichem
+gegenseitigem Ausschluss und deterministischen Fiber-Unterbrechungen nach.
+
+Der Gesamtlauf umfasst Modulstruktur, Installation und Bindung, Pause/Dock,
+Diagnose und Signierer, Importe, nativen Loopback-Transport, Befehlsplanung,
+Zustandsbewertung, Token-/GET-Regressionen sowie den vollständigen nativen
+RoboHub-Prüfstand und PHP-Lint. Die älteren B8-Diagnoseänderungen bleiben
+außerhalb des Refresh-Commits.
+
+Erst nach einem gesonderten Auftrag einen konkreten Pi-Stand bereitstellen
+und die Bedienfolge beaufsichtigt über Variable 22284 mit gealterten Caches
+testen.
 
 ## Lokaler Fertigstellungsstand ab 517d682
 
@@ -136,7 +237,8 @@ Frische bedeutet lokales Empfangsalter. Ein Gerätezeitstempel ist weiterhin
 unbelegt; ein frisch empfangener, cloudseitig alter Shadow ist nicht sicher
 erkennbar. Diese Grenze bleibt sichtbar und muss bei den separaten Live-Tests
 mit einer aktuellen Beobachtung von Gerät und Original-App abgeglichen werden.
-Es gibt keine automatische Listenauffrischung beim Befehl und keinen B8-Fallback.
+Die einmalige Listen-/Shadowauffrischung bei einer manuellen Bedienaktion
+steht oben beschrieben; es gibt keinen B8-Fallback.
 
 ## Vorhandene IP-Symcon-Bedienung und Einmalversand
 
@@ -210,11 +312,10 @@ Eine allgemeine Modellfreigabe, dynamische ID-Übernahme oder Wildcards sind unz
    Kein Wert wird vorgegeben; Wasser 0 ist eine ausdrückliche Auswahl.
    Der Test erfolgt beaufsichtigt am Gerät, mit für die Wasserwahl geeignetem
    Boden. Hersteller-App und reale Bewegung dienen dem Funktionsabgleich.
-4. Vor **jedem** der vier Schritte ausdrücklich `ROBOHUB_GeraeteSuchen(45174)`
-   und danach `ROBO_Aktualisieren(22708)` verwenden. Liste, Listenempfang und
-   gültiger Shadow müssen in derselben Sitzung/Laufzeit jeweils höchstens
-   120 Sekunden alt, eindeutig zugeordnet und fehlerfrei sein. Die Aufrufe
-   sind hier ausschließlich dokumentiert; sie wurden nicht ausgeführt.
+4. Nach späterer gesondert beauftragter Bereitstellung die Liste und den Shadow
+   bewusst über 120 Sekunden altern lassen. **Kein** vorgeschaltetes Suchen
+   oder „Jetzt aktualisieren“ auslösen. Die folgende manuelle Bedienaktion
+   muss fehlende Frische selbst einmalig herstellen und alle Nachweise prüfen.
 5. Die folgende Bedienfolge über die vorhandenen WebFront-Schaltflächen
    durchführen. Die RequestAction-Werte erläutern nur deren vorhandene Belegung:
 
@@ -225,9 +326,10 @@ Eine allgemeine Modellfreigabe, dynamische ID-Übernahme oder Wildcards sind unz
    | Fortsetzen | `pause` | dieselbe Start-Schaltfläche, Wert 1 | Continue ohne neue Startwerte; wirkliche Fortsetzung; nachgelesenes `cleaning` |
    | Dock | `cleaning` (allgemein auch `stop` oder `pause`) | Station, Wert 4 | Cloudannahme; wirkliche Rückfahrt; später Stationszustand |
 
-6. Nach jeder Aktion zunächst die reale Reaktion beobachten und danach den
-   Shadow aktualisieren. Keine nächste Aktion auf dem bereits verbrauchten
-   Snapshot auslösen. Eine fehlende Cloudantwort, Fehler, Timeout oder unklare
+6. Nach jeder Aktion zunächst die reale Reaktion beobachten. Die nächste andere
+   Bedienaktion liest einen verbrauchten Snapshot nach erfolgreicher Cloudannahme
+   selbst kontrolliert neu; keine manuelle Statusaktualisierung voraussetzen.
+   Eine fehlende Cloudantwort, Fehler, Timeout oder unklare
    Bewegung beendet die Testfolge; kein automatischer oder blinder manueller
    Neuversuch. Erst neu bewerten und einen frischen gültigen Stand lesen.
    Ein ACK beweist keine Ausführung. Eine automatische Entleerung nach Dock
@@ -280,7 +382,7 @@ verwenden den Fehlertext der manuellen Sperre statt des früheren globalen
 Freigabetexts; ihre Transport-, Zustands- und Timerprüfungen bleiben erhalten.
 Es wurde kein zusätzlicher Testmechanismus angelegt.
 
-Abschlussprüfung mit PHP 8.2.35:
+Historische Abschlussprüfung vom 12.11.2026 mit PHP 8.2.35 (vor dieser Korrektur):
 `bash tests/eureka/run-control-offline.sh` beendet mit Exitcode 0,
 3.547 Einzelprüfungen bestanden, keine Fehler im abschließenden Gesamtlauf.
 
@@ -306,9 +408,9 @@ ebenfalls fehlerfrei. Ein separater früherer RoboHub-Lauf hatte einen
 sporadischen Timeout des lokalen iRobot-UDP-Nachbaus; im abschließenden
 netzisolierten Gesamtlauf bestanden auch diese Gegenproben.
 
-Die Dateien `RoboHubEurekaDock.php`, `RoboHubEurekaDiagnose.php`,
+Im historischen Prüfstand blieben die Dateien `RoboHubEurekaDock.php`, `RoboHubEurekaDiagnose.php`,
 `RoboHubEurekaGenehmigung.php`, `RoboHubEurekaPauseTest.php` und
-`RoboHubEurekaProtokoll.php` bleiben gegenüber 517d682 unverändert.
+`RoboHubEurekaProtokoll.php` gegenüber 517d682 unverändert.
 Die individuelle Produktivkennung wird im Offlineprüfstand nicht verwendet;
 die positive Bedienregression nutzt die ausdrücklich
 erfundene Offlinekennung. Kein Offlineergebnis ersetzt den späteren realen

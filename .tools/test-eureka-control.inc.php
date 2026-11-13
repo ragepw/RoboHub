@@ -9,8 +9,15 @@ class ControlEureka extends OfflineFreigegebenEureka
     public array $posts = [];
     public array $antwort = ['status' => 200, 'response' => '{"errorCode":0}'];
     public $vorTransport = null;
+    public array $reads = [];
+    public $leseAntwort = null;
     protected function httpAusfuehren(string $m, string $p, string $t, ?array $b, ?callable $pruefen = null, bool $dock = false): array
     {
+        if ($m === 'GET') {
+            $this->reads[] = $p;
+            if (is_callable($this->leseAntwort)) { return ($this->leseAntwort)($p); }
+            throw new RoboHubFehler('Offline: Leseantwort fehlt.');
+        }
         if (is_callable($this->vorTransport)) { ($this->vorTransport)(); }
         $pruefen();
         $this->posts[] = [$m, $p, $b];
@@ -27,6 +34,8 @@ class ControlKonto extends RoboHubKonto
     {
         $echt = parent::treiber();
         $this->offline->befehlsKontext = $echt->befehlsKontext;
+        $this->offline->befehlsVorbereitung = $echt->befehlsVorbereitung;
+        $this->offline->befehlsErfolg = $echt->befehlsErfolg;
         $this->offline->befehlsVersuch = $echt->befehlsVersuch;
         $this->offline->beiUnauthorized = $echt->beiUnauthorized;
         $this->offline->pauseTest = $echt->pauseTest;
@@ -44,6 +53,7 @@ $controlObj = $GLOBALS['OBJ'];
 $controlInst = $GLOBALS['INST'];
 try {
     unset($GLOBALS['robohubTreiberFabrik']);
+    $GLOBALS['EUREKA_CONTROL_LOCKS'] = [];
     $ck = new ControlKonto(45174); $ck->Create();
     $ct = $ck->offline = new ControlEureka();
     $ck->props['Hersteller'] = 'eureka'; $ck->props['Region'] = 'eu';
@@ -57,8 +67,10 @@ try {
     $ck->WriteAttributeString('Buendel', json_encode($bundle));
     $ck->WriteAttributeString('BuendelRevision', 'offline-revision');
     $nummer = 0;
-    $reset = function (string $state = 'cleaning') use ($ck, $cg, $ct, &$nummer): void {
+    $reset = function (string $state = 'cleaning') use ($ck, $cg, $ct, $bundle, &$nummer): void {
         $nummer++;
+        $ck->WriteAttributeString('Buendel', json_encode($bundle));
+        $ck->WriteAttributeString('BuendelRevision', 'offline-revision');
         $g = e20Fixture()['geraet']; unset($g['stand']['roh']['connected']);
         $g['stand']['roh']['state'] = $state; $g['stand']['roh']['parentState'] = $state;
         $g['verbindungEmpfangen'] = $g['stand']['zeit'] = time();
@@ -72,7 +84,8 @@ try {
         $ck->WriteAttributeString('Schnappschuss', json_encode([$g['id'] => ['p' => $g['stand']]]));
         $ck->WriteAttributeInteger('GeraeteStand', time()); $ck->WriteAttributeInteger('WarteBis', 0);
         $ck->WriteAttributeString('EurekaBefehlsversuch', '{}');
-        $ct->posts = []; $ct->vorTransport = null;
+        $ct->posts = []; $ct->vorTransport = null; $ct->reads = []; $ct->leseAntwort = null;
+        $ck->SetBuffer('EurekaBedienRefreshBis', ''); $ck->SetBuffer('EurekaLetzteBedienung', '');
         $ct->antwort = ['status' => 200, 'response' => '{"errorCode":0}'];
         $cg->props['EurekaStartSaugstufe'] = -1; $cg->props['EurekaStartWasserstufe'] = -1;
         $cg->props['GeraetID'] = 'offline-e20'; $cg->props['Deaktiviert'] = false; $cg->parent = $ck;
@@ -286,7 +299,8 @@ try {
     }
     $reset(); $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_PAUSE);
     $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_STATION);
-    check('Verbrauch gilt auch für einen anderen Befehl mit demselben Stand', count($ct->posts) === 1);
+    check('Ohne erfolgreichen neuen Shadow kein anderer Befehl auf verbrauchtem Stand', count($ct->posts) === 1);
+    $ck->SetBuffer('EurekaBedienRefreshBis', '');
     $shadowAendern(function (&$s) { $s['roh']['state'] = $s['roh']['parentState'] = 'pause'; });
     $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
     check('Neu gelesener zulässiger Stand ermöglicht nächste Bedienaktion', count($ct->posts) === 2
@@ -320,7 +334,9 @@ try {
         $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
         check('Schlafbefund überwindet keine Sitzungsbindung ' . $typ, count($ct->posts) === 1);
     }
+    require __DIR__ . '/../tests/eureka/control-refresh-cases.php';
 } finally {
+    unset($GLOBALS['EUREKA_CONTROL_LOCKS']);
     $GLOBALS['robohubTreiberFabrik'] = $controlFabrik;
     $GLOBALS['OBJ'] = $controlObj; $GLOBALS['INST'] = $controlInst;
 }

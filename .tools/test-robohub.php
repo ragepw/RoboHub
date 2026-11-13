@@ -43,8 +43,14 @@ function IPS_GetObjectIDByIdent(string $ident, int $parent) {
     foreach ($GLOBALS['OBJ'] as $id => $o) { if ($o['ident'] === $ident && $o['parent'] === $parent) { return $id; } }
     return false;
 }
-function IPS_SemaphoreEnter(string $n, int $ms): bool { return !($GLOBALS['PARENT_LOCK_FEHLER'] ?? false) || !str_starts_with($n, 'RoboHubVerbindung_'); }
-function IPS_SemaphoreLeave(string $n): bool { return true; }
+function IPS_SemaphoreEnter(string $n, int $ms): bool {
+    if (isset($GLOBALS['EUREKA_CONTROL_LOCKS'])) {
+        if (isset($GLOBALS['EUREKA_CONTROL_LOCKS'][$n])) { return false; }
+        $GLOBALS['EUREKA_CONTROL_LOCKS'][$n] = true;
+    }
+    return !($GLOBALS['PARENT_LOCK_FEHLER'] ?? false) || !str_starts_with($n, 'RoboHubVerbindung_');
+}
+function IPS_SemaphoreLeave(string $n): bool { unset($GLOBALS['EUREKA_CONTROL_LOCKS'][$n]); return true; }
 const KL_MESSAGE = 10201;
 const KL_WARNING = 10204;
 function IPS_GetLibrary(string $guid): array { $l = json_decode(file_get_contents(dirname(__DIR__) . '/library.json'), true); return ['Version' => $l['version'] . '-beta.1', 'Build' => $l['build']]; }

@@ -24,6 +24,8 @@ class RoboHubEureka implements RoboHubTreiber
 
     /** Lokaler Konto-/Gerätekontext, nach Erwerb der Gerätesperre erneut lesen. */
     public $befehlsKontext = null;
+    public $befehlsVorbereitung = null;
+    public $befehlsErfolg = null;
     public $befehlsVersuch = null;
     public bool $manuelleBedienung = false;
     private ?array $steuerTransport = null;
@@ -549,7 +551,9 @@ class RoboHubEureka implements RoboHubTreiber
                 if ($test && $verbrauchen) { $pause->verbrauchen(); }
                 ($this->befehlsVersuch)($g, $b, $verbrauchen);
             },
-            $test ? fn(bool $beginn) => $pause->vorTransport($beginn) : null
+            $test ? fn(bool $beginn) => $pause->vorTransport($beginn) : null,
+            $test ? null : $this->befehlsVorbereitung,
+            $test ? null : $this->befehlsErfolg
         );
         return $weg->befehl($buendel, $geraet, $befehl, $parameter, $this->jetzt());
     }

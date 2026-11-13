@@ -18,10 +18,15 @@ final class RoboHubEurekaBefehlsweg
     private bool $manuell;
     private $versuch;
     private $vorTransport;
+    private $kontextVorbereiten;
+    private $beiErfolg;
 
     public function __construct(callable $transport, array $zuordnungen, ?callable $beiUnauthorized = null, ?callable $kontextLesen = null,
-        bool $manuell = false, ?callable $versuch = null, ?callable $vorTransport = null)
+        bool $manuell = false, ?callable $versuch = null, ?callable $vorTransport = null, ?callable $kontextVorbereiten = null,
+        ?callable $beiErfolg = null)
     {
+        $this->beiErfolg = $beiErfolg;
+        $this->kontextVorbereiten = $kontextVorbereiten;
         $this->vorTransport = $vorTransport;
         $this->manuell = $manuell;
         $this->versuch = $versuch;
@@ -171,14 +176,24 @@ final class RoboHubEurekaBefehlsweg
         }
         // Global pro Cloud-Gerät, auch über Konto-/Treiber-/Befehlsobjekte hinweg.
         // Kein Token oder individuelle Gerätekennung im Sperrnamen oder Log.
-        RoboHubEurekaProtokoll::identifikation($geraet);
-        $id = $geraet['id'];
+        if (!in_array($befehl, ['start', 'pause', 'station'], true)) {
+            throw new RoboHubFehler('Eureka: Dieser Befehl bleibt gesperrt.');
+        }
+        $id = $geraet['id'] ?? null;
+        if (!is_string($id) || !preg_match('/\A[A-Za-z0-9_-]{1,128}\z/D', $id)) {
+            throw new RoboHubFehler('Eureka: Ungültige Geräte-ID.');
+        }
         $sem = 'RoboHubEureka_Geraet_' . hash('sha256', 'eu:robozone:' . $id);
         if (!function_exists('IPS_SemaphoreEnter') || !function_exists('IPS_SemaphoreLeave') ||
             !IPS_SemaphoreEnter($sem, 1)) {
             throw new RoboHubFehler('Eureka: Gerät belegt oder Synchronisierung nicht verfügbar; kein Versand.');
         }
         try {
+            // Nur einmal pro manueller Anforderung und vor Plan/Verbrauch.
+            // Alle späteren Kontextprüfungen bleiben ausschließlich lokal.
+            if ($this->manuell && is_callable($this->kontextVorbereiten)) {
+                ($this->kontextVorbereiten)($id, $buendel, $befehl);
+            }
             $startAusEigenschaften = false;
             if (is_callable($this->kontextLesen)) {
                 $kontext = ($this->kontextLesen)($id, $buendel);
@@ -247,7 +262,9 @@ final class RoboHubEurekaBefehlsweg
                 throw new RoboHubFehler('Eureka: Token-Erneuerung fehlgeschlagen; Befehl nicht wiederholt.');
             }
         }
-        return self::antwortLesen($antwort);
+        $ergebnis = self::antwortLesen($antwort);
+        if (is_callable($this->beiErfolg)) { ($this->beiErfolg)($geraet, $buendel, $befehl); }
+        return $ergebnis;
     }
 
     public function befehl(array $buendel, array $geraet, string $befehl, array $parameter, int $jetzt): string
