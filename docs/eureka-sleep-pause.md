@@ -44,8 +44,9 @@ bestätigter ganzzahliger Akku 16–100 erforderlich.
 Der vorhandene Start-Bedieneinstieg baut dafür ausschließlich Continue, ohne
 Neuauftragsparameter. Pause und Station erhalten keine neue Freigabe. Die
 vorhandenen Identitäts-, Sitzungs-, Online-, Sperr-, Verbrauchs- und erneuten
-Kontextprüfungen bleiben bestehen. Die ERP-/B8-Entscheidung wird beibehalten;
-für diesen konkreten Shadow ist kein B8-Zusatz nötig. Unbekannte Schlafstrings
+Kontextprüfungen bleiben bestehen. Die spätere ERP-Neustarterweiterung ist in
+[Start aus Schlaf](eureka-start-aus-schlaf.md) dokumentiert;
+für diesen konkreten Pause-Shadow ist kein B8-Zusatz nötig. Unbekannte Schlafstrings
 und `pause_sleep` als Cloudstring werden nicht ergänzt.
 Die native Lesediagnose darf `sleep_pause` jetzt als bekannten Wert ausgeben.
 

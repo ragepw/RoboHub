@@ -206,7 +206,7 @@ foreach (['missing', 'unknown', 'capability', 'string', 'old', 'future', 'before
     $tests['Ungültiger Schlafbeleg bleibt gesperrt ' . $fall] = static function () use ($fall): void {
         $d = schlafGeraet(1);
         switch ($fall) {
-            case 'missing': unset($d['stand']['b8']); $d['stand']['roh']['sleep_type'] = 1; break;
+            case 'missing': unset($d['stand']['b8']['felder']['sleep_type']); $d['stand']['roh']['sleep_type'] = 1; break;
             case 'unknown': $d['stand']['b8']['felder']['sleep_type'] = 255; break;
             case 'capability': $d['stand']['b8']['felder']['sleep_type'] = 3; break;
             case 'string': $d['stand']['b8']['felder']['sleep_type'] = '1'; break;
@@ -223,9 +223,8 @@ foreach (['missing', 'unknown', 'capability', 'string', 'old', 'future', 'before
         commandError(fn() => commandPlan($d, 'start', ['fan' => 1, 'water' => 0, 'mode' => 8]));
     };
 }
-// Die real beobachtete Schlafkombination ist für die Anzeige konsistent,
-// belegt aber keinen neuen Auftrag statt Resume (Hersteller: sleepType).
-foreach (['start', 'pause', 'resume', 'station'] as $aktion) {
+// Der bestätigte ERP-Neustart gibt Pause, Continue und Station nicht frei.
+foreach (['pause', 'resume', 'station'] as $aktion) {
     $tests['Konsistentes ERP_model/sleep autorisiert keinen Versand: ' . $aktion] = static function () use ($aktion): void {
         $d = commandDevice('ERP_model');
         $d['stand']['roh'] += ['parentState' => 'sleep', 'cleanMissionState' => 'no_cleaning_mission'];
@@ -570,6 +569,7 @@ foreach ([['stop', 'start', ['fan' => 2, 'water' => 0, 'mode' => 8]],
     }
 }
 require __DIR__ . '/sleep-pause-cases.php';
+require __DIR__ . '/erp-start-cases.php';
 $errors = 0;
 // Warnungen (etwa implizite Typumwandlungen) sind ebenfalls Testfehler.
 set_error_handler(static function (int $severity, string $message): never { throw new RuntimeException('PHP-Warnung im Offline-Test.'); });

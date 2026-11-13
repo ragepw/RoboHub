@@ -227,3 +227,5 @@ $reset(); $lesedaten();
 $ct->vorTransport = function () use ($shadowAendern): void { $shadowAendern(function (&$s) { $s['zeit'] -= 121; }); };
 $cg->RequestAction('Befehl', 2);
 check('Frischeverlust vor I/O wird lokal abgewiesen und startet keinen späten Refresh', $ct->reads === [] && $ct->posts === []);
+
+require __DIR__ . '/sleep-start-flow-cases.php';

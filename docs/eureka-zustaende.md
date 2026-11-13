@@ -14,6 +14,13 @@ bestätigten Statusfelder ohne individuelle Kennungen.
 
 ## Real bestätigte Shadowkombinationen (12.11.2026)
 
+Ergänzung vom 13.11.2026: Der Nutzer bestätigt den App-Neustart aus regulärem
+ERP-Schlaf ohne Auftrag und erfolgreiches RoboHub-Resume aus Sleep-Pause.
+Die daraus lokal vorbereitete, exakt begrenzte Startentscheidung und ihre
+Beleggrenzen stehen im aktuellen Abschnitt von
+[Start aus Schlaf](eureka-start-aus-schlaf.md). Die folgenden ursprünglichen
+Messbefunde bleiben unverändert; der Missionsstring allein ist keine Freigabe.
+
 | state | parentState | cleanMissionState | Vorher | Nachher |
 | --- | --- | --- | --- | --- |
 | `cleaning` | `cleaning` | `no_cleaning_mission` | Reinigt (1) | Reinigt (1) |

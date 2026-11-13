@@ -1,5 +1,105 @@
 # Prüfung: neuer Start aus ERP_model/sleep
 
+## Aktueller Stand: regulärer ERP-Neustart lokal vorbereitet (13.11.2026)
+
+Dieser Abschnitt ersetzt die frühere Entscheidung, ERP ausschließlich mit B8
+freizugeben. Die darunterstehenden Nachprüfungen bleiben als historische Belege
+erhalten. Grundlage der Änderung ist der **zusätzliche Nutzer-Ablaufbeleg**:
+Das E20 schläft ohne Auftrag automatisch ein, die Hersteller-App startet daraus
+direkt einen neuen Auftrag; ein separater Weckschritt ist praktisch nicht
+verfügbar. Der schon bekannte Cloudzustand dafür ist `ERP_model/sleep`.
+`sleep_pause/sleep` mit unterbrochenem Auftrag wurde laut Nutzer inzwischen
+erfolgreich als Resume getestet. Dies sind Nutzerbelege, keine eigenen Liveproben.
+
+### Belege und Abgrenzung
+
+Originalplugin 2.5.4 erneut ausschließlich lokal als Text geprüft, SHA256
+`0a275bbd2ee8c076aeb8e1d314a4bbe98fa5c3c6aeb3750414765adc399f24c6`.
+Modul `1717-81717`, `startClean` (lokaler Modulauszug Zeilen 1786 ff.;
+Original-Chunk `1717.56df39ab132cf7deb9d6.js`): Nach der Akkuschranke >15
+führt Schlaf nur für `pause_sleep` bzw. bedingt `pause_charge_sleep` zu
+`cmdStopWork(continue)`. Der andere Schlafpfad sendet für Ganzhaus
+`cmdStartWork(auto, fan_level, water_level)`. Ein zusätzlicher Weckbefehl
+steht dort nicht. Die reguläre Startsequenz ist somit für nicht fortzusetzenden
+Hersteller-Schlaf vorgesehen. Stationsschlaf `sleep_in_station` ist ebenfalls
+kein ausgeschlossener Zustand dieses allgemeinen Startzweigs.
+
+Die Cloudstrings `ERP_model`, `sleep_pause`, `cleanMissionState`,
+`no_cleaning_mission` und `have_cleaning_mission` fehlen weiterhin in sämtlichen
+JavaScript-Dateien des Archivs. **Die konkrete Cloudzuordnung folgt aus den
+bestätigten Abläufen und ist keine Hersteller-Übersetzungstabelle.** Es wird
+kein bestimmter B8-Untertyp aus ERP abgeleitet.
+
+`cleanMissionState` wird nur zusammen mit beiden Zustandsfeldern ausgewertet.
+`no_cleaning_mission` allein beweist keinen fehlenden Auftrag: Es wurde auch
+während Reinigung beobachtet. Umgekehrt beweist `have_cleaning_mission` allein
+keine Pause. `autoType`, `cleaningType`, `cleanProgress`, fan/water und Akku
+enthalten im lokalen Bestand keinen unabhängigen verlässlichen Nachweis eines
+fortsetzbaren Auftrags. Beispielsweise bleibt `autoType=room_cleaning` über
+mehrere Zustandswechsel erhalten. Sie werden daher nicht als zusätzliche
+Auftragsheuristik verwendet. Hersteller-`has_task` wird aus Arbeitszustand,
+Schlafuntertyp und `cleaning_type` berechnet; es ist kein unabhängig belegtes
+HTTPS-Shadowfeld und kein Ersatz für die konkrete Kombination.
+
+Die vorhandene B8-Untersuchung im Arbeitsstand meldet für
+den realen Abruf HTTP 200 ohne Antwortdaten. Es existiert daraus **kein**
+verwertbarer Arbeitsstatus oder Schlafuntertyp. Die vorhandene lokale
+Warteparameterkorrektur und die Diagnoseinfrastruktur bleiben erhalten;
+keine weitere Diagnose wird implementiert oder ausgeführt.
+
+### Eng begrenzte Änderung
+
+`RoboHubEurekaZustand::schlafAktion()` erlaubt jetzt ohne B8-Zusatz einen
+neuen Auftrag ausschließlich bei `ERP_model` + `sleep` +
+`no_cleaning_mission` + explizit `deviceFault=[]`, mit ganzzahligem Akku
+16–100 und positiver, nicht zukünftiger Empfangszeit bis 120 Sekunden.
+ERP mit Auftrag, fehlender/ungültiger Mission, abweichendem Parent oder Fehler
+bleibt gesperrt. `sleep_pause/sleep/have_cleaning_mission` bleibt ausschließlich
+Resume und erhält keine Neuauftragsparameter.
+
+**Ein vorhandener B8-Zusatz wird nicht ignoriert.** Die bisherige Prüfung
+auf Alter, Bezug zum Shadow, Arbeitszustand, Akku, Fehlerbytes und Schlafuntertyp
+bleibt maßgeblich: 1/4 → neuer Start, 2 → ausschließlich Resume, 3/unbekannt
+→ gesperrt. Auch `null`, typfalsche oder unvollständige Zusatzdaten sperren
+anstatt auf die neue ERP-Regel zurückzufallen. Ein gültiger Typ 2 ist der
+bisherige speziellere Continue-Beleg, kein Beweis für einen auftragslosen ERP-
+Neustart. Mission `have_cleaning_mission` im ERP-Shadow wird unabhängig davon
+nicht freigegeben. Der Cloud-Missionsstring allein überschreibt keinen B8-Befund.
+
+Der bestehende Konto-Kontext liefert damit für den neuen erlaubten ERP-Start
+die ausgewählten Integerwerte an den vorhandenen Befehlsweg. Nur Saugen /
+Stark / Aus ergibt `fan=3, water=0, mode=8` und unverändert
+`AA15B800000000000002220200020008030000000000`. Es gibt keinen neuen Sender,
+Weckbefehl, Timer oder Retry. Geräte-/Modellbindung, Onlineprüfung,
+Sitzung/Laufzeit, Gerätesperre, Verbrauch und Kontextprüfung vor I/O bleiben
+bestehen. Ein Refresh ersetzt weiterhin vollständig den Shadow samt B8-Zusatz.
+
+### Offlineprüfung und verbleibende Grenze
+
+Die 54 nativen GET-/Bedienabläufe prüfen nun den erlaubten ERP-Neustart,
+gesperrten ERP mit Auftrag/fehlender Mission, Sleep-Pause-Continue auch bei
+ungültiger Startauswahl, Laden/Geladen, unbekannte und widersprüchliche Zustände.
+`erp-start-cases.php` ergänzt alle zwölf Parameter-/Bytekombinationen,
+Einmalverbrauch, Akku-/Zeitgrenzen, fehlende und typfalsche Felder, ungültige
+Startparameter, Bindung/Offline und Sperren bei defektem B8-Zusatz.
+Bestehende gültige B8-Continue-/Startfälle bleiben erhalten. Frühere Tests,
+die allein das Fehlen eines B8-Zusatzes als Sperrgrund erwarteten, sind an den
+neuen, eng begrenzten Vertrag angepasst; übrige Gegenproben bleiben bestehen.
+
+Validierung: vollständiger Lauf `bash tests/eureka/run-control-offline.sh`
+im eigenen Netzwerk-Namespace, Exitcode 0, einschließlich der 114 nativen
+Sleep-Start-Assertions, aller bisherigen Offlineprüfstände und 101 PHP-Lints.
+Die anschließend ergänzten zwölf ERP-Parameterkombinationen wurden mit dem
+gesamten Befehlsprüfstand separat netzisoliert geprüft: 456 Tests, 0 Fehler.
+`git diff --check` ist fehlerfrei.
+
+Die Bestätigung der realen Ausführung dieses **RoboHub-Neustartpfads** steht
+noch aus. Der Nutzerbeleg zur App ersetzt diesen Laufzeittest nicht. Ohne
+neue Cloudzugriffe wird keine weitergehende Zuordnung oder Gerätefrische
+behauptet. Änderungen bleiben lokal, ohne Commit, Push oder Deployment.
+
+## Historischer Belegbericht
+
 Nur lokale statische Analyse und Offlineprüfungen. Keine produktive Abfrage,
 Cloudaktion, Befehlsausführung, Bereitstellung oder Änderung der Freigaben.
 

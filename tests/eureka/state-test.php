@@ -255,10 +255,14 @@ foreach (observedE20Shadows() as $fixture) {
         }
         commandAssert(count($t->calls) === 1);
         if (in_array($p['state'], ['ERP_model', 'collecting_dust'], true)) {
-            // Selbst mit künstlich positivem connected entsteht keine neue Planerfreigabe.
+            // Nur der exakt belegte ERP-Schlaf erhält eine Neuauftragsfreigabe.
             $d['stand']['roh']['connected'] = true; unset($d['roh']['connected']);
             foreach (['start', 'pause', 'station'] as $command) {
-                commandError(fn() => commandPlan($d, $command, ['fan' => 2, 'water' => 0, 'mode' => 8]));
+                if ($p['state'] === 'ERP_model' && $command === 'start') {
+                    commandAssert(commandPlan($d)['aktion'] === 'start');
+                } else {
+                    commandError(fn() => commandPlan($d, $command, ['fan' => 2, 'water' => 0, 'mode' => 8]));
+                }
             }
             commandAssert(str_contains($r['werte']['ZustandRoh'], $p['state'] . ' / ' . $p['parentState']));
         }

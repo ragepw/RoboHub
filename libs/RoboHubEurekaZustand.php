@@ -103,27 +103,38 @@ final class RoboHubEurekaZustand
             ($roh['deviceFault'] ?? null) === [];
     }
 
-    /** Lokale Schlafentscheidung; ERP benötigt weiterhin den ergänzenden B8-Beleg. */
+    /** Exakte Cloudkombinationen gemäß Ablaufbeleg in docs/eureka-start-aus-schlaf.md. */
     public static function schlafAktion(array $stand, int $jetzt): ?string
     {
         $roh = $stand['roh'] ?? [];
-        if (is_array($roh) && self::schlafPause($roh)) {
-            // Hersteller-startClean prüft auch vor Schlaf-Continue den Akku.
-            return is_int($stand['zeit'] ?? null) && $stand['zeit'] > 0 &&
-                $stand['zeit'] <= $jetzt && $jetzt - $stand['zeit'] <= 120 &&
-                is_int($roh['batteryLevel'] ?? null) && $roh['batteryLevel'] > 15 &&
-                $roh['batteryLevel'] <= 100 ? 'resume' : null;
+        // Hersteller-startClean prüft auch vor Schlaf-Continue den Akku.
+        if (!is_array($roh) || !is_int($stand['zeit'] ?? null) || $stand['zeit'] <= 0 ||
+            $stand['zeit'] > $jetzt || $jetzt - $stand['zeit'] > 120 ||
+            !is_int($roh['batteryLevel'] ?? null) || $roh['batteryLevel'] <= 15 ||
+            $roh['batteryLevel'] > 100 || ($roh['deviceFault'] ?? null) !== []) {
+            return null;
         }
-        $b8 = $stand['b8'] ?? [];
-        $f = $b8['felder'] ?? [];
+        if (self::schlafPause($roh)) {
+            return 'resume';
+        }
         if (($roh['state'] ?? null) !== 'ERP_model' || ($roh['parentState'] ?? null) !== 'sleep' ||
-            ($roh['cleanMissionState'] ?? null) !== 'no_cleaning_mission' ||
-            !is_int($stand['zeit'] ?? null) || !is_int($b8['zeit'] ?? null) ||
+            ($roh['cleanMissionState'] ?? null) !== 'no_cleaning_mission') {
+            return null;
+        }
+        // Bestätigter regulärer Schlaf ohne Auftrag. Kein generischer sleep-Fallback;
+        // der Missionsstring allein belegt außerhalb dieser Kombination nichts.
+        if (!array_key_exists('b8', $stand)) {
+            return 'start';
+        }
+        // Vorhandene Zusatzdaten niemals durch den Cloudpfad umgehen, auch bei
+        // fehlenden Feldern, falschen Typen, veraltetem oder unklarem Befund.
+        $b8 = $stand['b8'];
+        $f = is_array($b8) ? ($b8['felder'] ?? null) : null;
+        if (!is_array($b8) || !is_array($f) || !is_int($b8['zeit'] ?? null) ||
             $b8['zeit'] < $stand['zeit'] || $b8['zeit'] > $jetzt || $jetzt - $b8['zeit'] > 120 ||
             !in_array($f['arbeit'] ?? null, [12, 18], true) ||
             ($f['fehlerklasse'] ?? null) !== 0 || ($f['fehlercode'] ?? null) !== 0 ||
-            !is_int($f['akku'] ?? null) || $f['akku'] <= 15 || $f['akku'] > 100 ||
-            !is_int($roh['batteryLevel'] ?? null) || $roh['batteryLevel'] <= 15 || $roh['batteryLevel'] > 100) {
+            !is_int($f['akku'] ?? null) || $f['akku'] <= 15 || $f['akku'] > 100) {
             return null;
         }
         return match ($f['sleep_type'] ?? null) {
