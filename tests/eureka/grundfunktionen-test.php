@@ -29,3 +29,29 @@ foreach (['offline', 'alt', 'fehler', 'parent'] as $fall) {
     commandError(fn() => commandPlan($d, 'teppichmodus', ['teppichmodus' => 1]));
 }
 echo "Teppich-Protokoll, Werte, Zustands- und Sicherheitsgegenproben bestanden\n";
+
+// Regulärer Schlaf: ausschließlich der bestätigte Teppichbefehl.
+foreach ([0, 1] as $wert) {
+    $d = commandDevice('ERP_model');
+    $d['stand']['roh']['parentState'] = 'sleep';
+    $d['stand']['roh']['cleanMissionState'] = 'no_cleaning_mission';
+    commandAssert(commandPlan($d, 'teppichmodus', ['teppichmodus' => $wert])['body'] ===
+        ['data' => RoboHubEurekaProtokoll::teppichmodus($wert)]);
+    foreach (['parent', 'mission', 'fault', 'missing-fault', 'old', 'offline', 'binding', 'value', 'extra'] as $fall) {
+        $g = $d; $p = ['teppichmodus' => $wert];
+        switch ($fall) {
+            case 'parent': $g['stand']['roh']['parentState'] = 'unknown'; break;
+            case 'mission': $g['stand']['roh']['cleanMissionState'] = 'have_cleaning_mission'; break;
+            case 'fault': $g['stand']['roh']['deviceFault'] = [1]; break;
+            case 'missing-fault': unset($g['stand']['roh']['deviceFault']); break;
+            case 'old': $g['stand']['zeit'] -= 121; break;
+            case 'offline': $g['stand']['roh']['connected'] = false; break;
+            case 'binding': $g['stand']['deviceId'] = 'other'; break;
+            case 'value': $p['teppichmodus'] = '1'; break;
+            case 'extra': $p['other'] = 1; break;
+        }
+        commandError(fn() => commandPlan($g, 'teppichmodus', $p));
+    }
+    foreach (['pause', 'station'] as $b) { commandError(fn() => commandPlan($d, $b, [])); }
+}
+echo "Teppich-Schlafgrenzen und Sicherheitsgegenproben bestanden\n";

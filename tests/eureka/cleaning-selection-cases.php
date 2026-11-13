@@ -156,3 +156,48 @@ $reset('stop'); $cg->RequestAction('EurekaTeppichmodus', 1);
 $ct->vorTransport = function () use ($cg): void { $cg->SetValue('EurekaTeppichmodus', 0); };
 try { $cg->RequestAction('EurekaTeppichAnwenden', 1); } catch (Exception $e) { }
 check('Geänderte Teppichauswahl vor Transport sperrt Versand', $ct->posts === []);
+
+abschnitt('Eureka: Teppich im regulären Schlaf und unbekannter Istwert');
+foreach ([0, 1] as $wert) {
+    $reset('ERP_model');
+    $shadowAendern(function (&$s) {
+        $s['roh']['parentState'] = 'sleep';
+        $s['roh']['cleanMissionState'] = 'no_cleaning_mission';
+    });
+    $cg->RequestAction('EurekaTeppichmodus', $wert);
+    $cg->ApplyChanges();
+    $v = $GLOBALS['OBJ'][IPS_GetObjectIDByIdent('EurekaTeppichIstwert', 22708)];
+    check('Schlafauswahl und Modulstart senden nichts; Istwert bleibt unbekannt und ohne Aktion',
+        $ct->reads === [] && $ct->posts === [] && empty($v['action'])
+        && $cg->GetValue('EurekaTeppichIstwert') === 'Unbekannt');
+    $cg->RequestAction('EurekaTeppichAnwenden', 1);
+    check('Schlaf-Anwenden sendet genau einmal ohne Sollwert als Istwert zu übernehmen',
+        count($ct->posts) === 1 && $ct->posts[0][2] === ['data' => RoboHubEurekaProtokoll::teppichmodus($wert)]
+        && $cg->GetValue('EurekaTeppichIstwert') === 'Unbekannt');
+    try { $cg->RequestAction('EurekaTeppichAnwenden', 1); } catch (Exception $e) { }
+    check('Verbrauchter Schlafversuch sendet nicht erneut', count($ct->posts) === 1);
+}
+foreach (['sleep', 'sleep_pause', 'unknown'] as $state) {
+    $reset($state);
+    $shadowAendern(function (&$s) { $s['roh']['parentState'] = 'sleep'; });
+    $cg->RequestAction('EurekaTeppichmodus', 0);
+    try { $cg->RequestAction('EurekaTeppichAnwenden', 1); } catch (Exception $e) { }
+    check('Unbestätigter Schlaf bleibt ohne Teppichtransport ' . $state, $ct->posts === []);
+}
+// Vorhandener manueller Refresh darf einen alten Shadow ersetzen, kein neuer Abrufweg.
+$reset('ERP_model');
+$shadowAendern(function (&$s) {
+    $s['zeit'] -= 121;
+    $s['roh']['parentState'] = 'sleep';
+    $s['roh']['cleanMissionState'] = 'no_cleaning_mission';
+});
+$ct->leseAntwort = static function (): array {
+    $roh = e20Fixture()['geraet']['stand']['roh'];
+    $roh['state'] = 'ERP_model'; $roh['parentState'] = 'sleep';
+    $roh['cleanMissionState'] = 'no_cleaning_mission';
+    return ['status' => 200, 'response' => json_encode(['errorCode' => 0, 'data' => $roh])];
+};
+$cg->RequestAction('EurekaTeppichmodus', 1);
+$cg->RequestAction('EurekaTeppichAnwenden', 1);
+check('Alter Schlaf-Shadow wird kontrolliert einmal vor explizitem Teppich-POST erneuert',
+    count($ct->reads) === 1 && count($ct->posts) === 1);

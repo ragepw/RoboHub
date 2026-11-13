@@ -1254,6 +1254,11 @@ class RoboHubGeraet extends IPSModule
     private function eurekaAuswahlAnlegen(): void
     {
         $aktiv = $this->istEurekaE20();
+        // Kein belegter Teppichwert im vorhandenen Shadow, kein automatischer B8-Abruf.
+        // Separate, nicht bedienbare Anzeige; weder Sollwert noch Cloud-ACK sind Istwerte.
+        $this->MaintainVariable('EurekaTeppichIstwert', 'Teppichverstärkung (Istwert)', VARIABLETYPE_STRING,
+            ['PRESENTATION' => VARIABLE_PRESENTATION_VALUE_PRESENTATION], 19, $aktiv);
+        if ($aktiv) { $this->SetValue('EurekaTeppichIstwert', 'Unbekannt'); }
         $position = 20;
         foreach ([
             'EurekaTeppichmodus' => ['Teppichverstärkung (Sollwert)', [0 => 'Aus', 1 => 'Ein']],

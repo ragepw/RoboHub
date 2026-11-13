@@ -77,15 +77,19 @@ Ein: `AA0DB800000000000002220C010A`.
 Der bestehende geschützte Befehlsweg übernimmt individuelle Geräte-/Profilbindung,
 Sitzung, Frische, Online-/Fehlerprüfung, Semaphore, Verbrauch vor Transport und
 Retryverbot. Die neue Aktion ist konservativ auf konsistente Zustände stop,
-charging, charging_finish, pause und cleaning beschränkt. Schlaf, Stationsarbeit,
-Fehler und unbekannte Zustände bleiben dafür gesperrt. Eine geänderte Auswahl
+charging, charging_finish, pause und cleaning sowie den exakt bestätigten
+regulären Schlaf ERP_model/sleep ohne Auftrag beschränkt. Andere Schlafzustände,
+Stationsarbeit, Fehler und unbekannte Zustände bleiben dafür gesperrt. Beleg und
+Grenzen: [Teppich-Schlafnachweis](eureka-teppich-schlaf-nachweis.md). Eine geänderte Auswahl
 vor dem Transport sperrt den Versand. Vorhandene Start-/Pause-/Resume-/Dock-
 Prüfungen und deren erlaubte Zustände bleiben unverändert.
 
 Die App-Abfolge mit zusätzlichem requestWorkState wird nicht übernommen; es
 gibt keinen neuen automatischen B8-Befehl. Eine Cloudannahme ist keine bestätigte
 Geräteübernahme. Ohne belegte HTTPS-Zuordnung gibt es keinen erfundenen Teppich-
-Istwert. Moppanhebung, Teppichvermeidung, Mehrfachmodi oder Wasseränderung werden
+Istwert. Die separate schreibgeschützte native Anzeige `EurekaTeppichIstwert`
+bleibt deshalb vorerst „Unbekannt“; sie übernimmt weder Sollwert noch Cloud-ACK.
+Moppanhebung, Teppichvermeidung, Mehrfachmodi oder Wasseränderung werden
 nicht aus diesem binären Verstärkungsschalter abgeleitet oder freigeschaltet.
 
 ## C: Zustandsanzeige

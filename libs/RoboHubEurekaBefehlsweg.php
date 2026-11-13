@@ -75,7 +75,14 @@ final class RoboHubEurekaBefehlsweg
             'pause' => 'paused',
             'stop' => 'idle',
             'charging', 'charging_finish' => 'docked',
-            'ERP_model', 'sleep_pause' => $schlaf === null ? null : 'sleep-' . $schlaf,
+            // Bestätigter App-Praxistest: nur regulärer Schlaf ohne Auftrag.
+            // Kein generischer Schlafpfad und keine Änderung an Start/Resume.
+            'ERP_model' => $befehl === 'teppichmodus' &&
+                ($roh['parentState'] ?? null) === 'sleep' &&
+                ($roh['cleanMissionState'] ?? null) === 'no_cleaning_mission' &&
+                ($roh['deviceFault'] ?? null) === [] ? 'carpet-sleep' :
+                ($schlaf === null ? null : 'sleep-' . $schlaf),
+            'sleep_pause' => $schlaf === null ? null : 'sleep-' . $schlaf,
             default => null,
         };
         // Nur feste lokale Gründe ausgeben, niemals Herstellerwerte oder Kennungen.
@@ -113,7 +120,7 @@ final class RoboHubEurekaBefehlsweg
             $hex = RoboHubEurekaProtokoll::pause();
         } elseif ($befehl === 'station' && in_array($gruppe, ['idle', 'paused', 'cleaning'], true)) {
             $hex = RoboHubEurekaProtokoll::station();
-        } elseif ($befehl === 'teppichmodus' && in_array($gruppe, ['idle', 'docked', 'paused', 'cleaning'], true)) {
+        } elseif ($befehl === 'teppichmodus' && in_array($gruppe, ['idle', 'docked', 'paused', 'cleaning', 'carpet-sleep'], true)) {
             if (array_keys($parameter) !== ['teppichmodus']) {
                 throw new RoboHubFehler('Eureka: Expliziter Teppichmodus erforderlich.');
             }
