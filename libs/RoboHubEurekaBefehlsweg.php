@@ -78,9 +78,18 @@ final class RoboHubEurekaBefehlsweg
             'ERP_model' => $schlaf === null ? null : 'sleep-' . $schlaf,
             default => null,
         };
-        if ($gruppe === null || !$bewertung['konsistent'] ||
-            !array_key_exists('deviceFault', $roh) || $roh['deviceFault'] !== []) {
-            throw new RoboHubFehler('Eureka: Zustand unbekannt, widersprüchlich oder fehlerhaft.');
+        // Nur feste lokale Gründe ausgeben, niemals Herstellerwerte oder Kennungen.
+        // Ein erfolgreicher GET ist kein Nachweis eines vollständigen Shadows.
+        $gruende = [];
+        if ($gruppe === null) { $gruende[] = 'zustandsgruppe-nicht-belegt'; }
+        if (!$bewertung['konsistent']) { $gruende[] = 'state-parent-unklar'; }
+        if (!array_key_exists('deviceFault', $roh)) {
+            $gruende[] = 'deviceFault-fehlt';
+        } elseif ($roh['deviceFault'] !== []) {
+            $gruende[] = 'deviceFault-nicht-leer-oder-ungueltig';
+        }
+        if ($gruende !== []) {
+            throw new RoboHubFehler('Eureka: Zustand unbekannt, widersprüchlich oder fehlerhaft. Gründe: ' . implode(', ', $gruende) . '.');
         }
         $aktion = $befehl;
         if ($befehl === 'start' && in_array($gruppe, ['paused', 'sleep-resume'], true)) {

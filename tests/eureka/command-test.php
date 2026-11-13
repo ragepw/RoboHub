@@ -175,6 +175,13 @@ $tests['Pause wird fortgesetzt, ohne neue Saug- oder Wasserwerte'] = static func
     commandAssert($p['aktion'] === 'resume' && $p['body']['data'] === 'AA0DB800000000000002221C00FB');
     commandError(fn() => commandPlan($d));
 };
+$tests['Vollständiger pause/pause-Shadow bleibt Resume mit unverändertem Rahmen'] = static function (): void {
+    $d = commandDevice('pause');
+    $d['stand']['roh']['parentState'] = 'pause';
+    $d['stand']['roh']['cleanMissionState'] = 'have_cleaning_mission';
+    $p = commandPlan($d, 'start', []);
+    commandAssert($p['aktion'] === 'resume' && $p['body']['data'] === RoboHubEurekaProtokoll::fortsetzen());
+};
 // Auswertung des bereits validierten B8-Zusatzes; Cloud-sleep_type allein ist kein Beleg.
 function schlafGeraet(int $typ): array
 {

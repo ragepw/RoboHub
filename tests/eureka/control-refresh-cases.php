@@ -182,6 +182,47 @@ foreach (['liste', 'shadow'] as $phase) {
         json_decode($f->getReturn(), true)['ok'] && count($ct->reads) === 1 && count($ct->posts) === 1 && $GLOBALS['EUREKA_CONTROL_LOCKS'] === []);
 }
 
+// Regression zur Live-Sammelmeldung: neuer Shadow ersetzt alte Pflichtfelder,
+// auch wenn beide im Display denselben pause/pause-Text ergeben könnten.
+foreach (['vollstaendig', 'fault-fehlt', 'fault-null', 'fault-string', 'fault-gemeldet',
+    'state-fehlt', 'state-typ', 'parent-konflikt', 'parent-typ', 'akku-fehlt', 'akku-typ',
+    'zusatzstatus-fehlt', 'sleep', 'cleaning', 'charging', 'stop'] as $fall) {
+    $reset();
+    $cg->RequestAction('Befehl', 2); // angenommene Pause; Folgeaktion erzwingt GET
+    $roh = e20Fixture()['geraet']['stand']['roh']; unset($roh['connected']);
+    $roh['state'] = $roh['parentState'] = 'pause';
+    $roh['cleanMissionState'] = 'have_cleaning_mission';
+    $grund = null;
+    switch ($fall) {
+        case 'fault-fehlt': unset($roh['deviceFault']); $grund = 'deviceFault-fehlt'; break;
+        case 'fault-null': $roh['deviceFault'] = null; $grund = 'deviceFault-nicht-leer-oder-ungueltig'; break;
+        case 'fault-string': $roh['deviceFault'] = 'offline-secret'; $grund = 'deviceFault-nicht-leer-oder-ungueltig'; break;
+        case 'fault-gemeldet': $roh['deviceFault'] = ['offline-secret']; $grund = 'deviceFault-nicht-leer-oder-ungueltig'; break;
+        case 'state-fehlt': unset($roh['state']); $grund = 'state-parent-unklar'; break;
+        case 'state-typ': $roh['state'] = ['offline-secret']; $grund = 'state-parent-unklar'; break;
+        case 'parent-konflikt': $roh['parentState'] = 'charging'; $grund = 'state-parent-unklar'; break;
+        case 'parent-typ': $roh['parentState'] = ['offline-secret']; $grund = 'state-parent-unklar'; break;
+        case 'akku-fehlt': unset($roh['batteryLevel']); break;
+        case 'akku-typ': $roh['batteryLevel'] = 'offline-secret'; break;
+        case 'zusatzstatus-fehlt': unset($roh['cleanMissionState']); break;
+        case 'sleep': case 'cleaning': case 'charging': case 'stop':
+            $roh['state'] = $roh['parentState'] = $fall; break;
+    }
+    $ct->leseAntwort = static fn(): array => $getAntwort($roh);
+    $logStart = count($GLOBALS['LOG']);
+    $cg->RequestAction('Befehl', 1);
+    $meldungen = implode('\n', array_slice($GLOBALS['LOG'], $logStart));
+    $stand = json_decode($ck->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'];
+    check('Refresh übernimmt ausschließlich den neuen Shadow ' . $fall,
+        $ct->reads === [$shadowPfad] && $stand['roh'] === $roh && $stand['statusquelle']['quelle'] === 'shadow-get');
+    $resume = in_array($fall, ['vollstaendig', 'akku-fehlt', 'akku-typ', 'zusatzstatus-fehlt'], true);
+    check('Pause/Resume nach automatischem Refresh bleibt gezielt geprüft ' . $fall,
+        count($ct->posts) === ($resume ? 2 : 1) &&
+        (!$resume || $ct->posts[1][2] === ['data' => RoboHubEurekaProtokoll::fortsetzen()]) &&
+        ($grund === null || str_contains($meldungen, $grund)) &&
+        !str_contains($meldungen, 'offline-secret') && !str_contains($meldungen, 'offline-e20'));
+}
+
 $reset(); $lesedaten();
 $ct->vorTransport = function () use ($shadowAendern): void { $shadowAendern(function (&$s) { $s['zeit'] -= 121; }); };
 $cg->RequestAction('Befehl', 2);
