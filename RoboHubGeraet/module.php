@@ -155,7 +155,16 @@ class RoboHubGeraet extends IPSModule
     {
         switch ($Ident) {
             case 'Befehl':
-                $this->fuehreAus($this->befehlsName((int)$Value), [], true);
+                $befehl = $this->befehlsName((int)$Value);
+                // Nur feste Befehlsnamen, keine IDs, Nutzlasten oder Kontoantworten im Debug.
+                $this->SendDebug('Bedienung', $befehl . ': angefordert', 0);
+                $ok = $this->fuehreAus($befehl, [], true);
+                $this->SendDebug('Bedienung', $befehl . ($ok ? ': gesendet' : ': fehlgeschlagen'), 0);
+                if (!$ok) {
+                    // UpdateVisualizationValue erreicht nur die Kachel. Symcon leitet
+                    // diese Ausgabe auch an das klassische WebFront zurück.
+                    echo RoboHubText::t('Command failed. Check the RoboHub message log for details; update the status before another action.');
+                }
                 // Befehl ist ein Taster, kein Zustand: bleibt nicht stehen.
                 return;
             case 'Zuordnen':

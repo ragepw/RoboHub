@@ -1,6 +1,7 @@
 {
     "translations": {
         "de": {
+            "Command failed. Check the RoboHub message log for details; update the status before another action.": "Befehl fehlgeschlagen. Details im RoboHub-Meldungsprotokoll prüfen; vor erneutem Bedienen den Status aktualisieren.",
             "Cloud reports connected": "Cloud meldet verbunden",
             "Cloud reports connected (device confirmation missing)": "Cloud meldet verbunden (Gerätebestätigung fehlt)",
             "Eureka: suction for a new whole-home cleaning": "Eureka: Saugstufe für eine neue Ganzhausreinigung",

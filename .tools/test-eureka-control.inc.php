@@ -88,6 +88,47 @@ try {
     check('Offlineadapter verwendet das echte einzelne E20-Profil',
         (new ReflectionClass(OfflineFreigegebenEureka::class))->getConstant('BEFEHLS_ZUORDNUNGEN') ===
         (new ReflectionClass(RoboHubEureka::class))->getConstant('BEFEHLS_ZUORDNUNGEN'));
+    // Variablen-ID -> Standardaktion -> Modul; kein echter Symcon-Aufruf.
+    $webfrontDouble = function (int $id, int $wert) use ($cg): string {
+        $v = $GLOBALS['OBJ'][$id];
+        if (!$v['action'] || $v['type'] !== VARIABLETYPE_INTEGER || $v['parent'] !== $cg->InstanceID) {
+            throw new RuntimeException('Offline: keine Integer-Standardaktion');
+        }
+        ob_start();
+        try { $cg->RequestAction($v['ident'], $wert); return ob_get_contents(); }
+        finally { ob_end_clean(); }
+    };
+    $v = $GLOBALS['OBJ'][22284];
+    check('Bestehende Befehlsvariable: Integer, aktive Aktion, fünf Aufzählungswerte',
+        $v['type'] === VARIABLETYPE_INTEGER && $v['action'] === true &&
+        $v['pres']['PRESENTATION'] === VARIABLE_PRESENTATION_ENUMERATION &&
+        array_column(json_decode($v['pres']['OPTIONS'], true), 'Value') === [1, 2, 3, 4, 5]);
+    $reset(); $cg->debug = [];
+    $vorher = $ck->ReadAttributeString('Schnappschuss');
+    $ausgabe = $webfrontDouble(22284, 2);
+    check('WebFront-Double: Pause erreicht Konto und Transport genau einmal',
+        $ausgabe === '' && count($ct->posts) === 1 &&
+        $ct->posts[0][2] === ['data' => RoboHubEurekaProtokoll::pause()] &&
+        $ck->ReadAttributeString('Schnappschuss') === $vorher && $cg->GetValue('Befehl') === 0);
+    check('Bedien-Debug bestätigt Eingang und Versand ohne Rohdaten',
+        $cg->debug === ['Bedienung: pause: angefordert', 'Bedienung: pause: gesendet']);
+    foreach (['verbraucht', 'zustand', 'bindung', 'deaktiviert', 'alter', 'cloudfehler'] as $fall) {
+        $reset(); $cg->debug = [];
+        if ($fall === 'verbraucht') { $webfrontDouble(22284, 2); $cg->debug = []; }
+        if ($fall === 'zustand') { $shadowAendern(function (&$s) { $s['roh']['state'] = 'pause'; }); }
+        if ($fall === 'bindung') { $cg->parent = null; }
+        if ($fall === 'deaktiviert') { $cg->props['Deaktiviert'] = true; }
+        if ($fall === 'alter') { $shadowAendern(function (&$s) { $s['zeit'] -= 121; }); }
+        if ($fall === 'cloudfehler') { $ct->antwort = ['status' => 200, 'response' => '{"errorCode":1,"secret":"offline-secret"}']; }
+        $anzahl = count($ct->posts);
+        $stand = $ck->ReadAttributeString('Schnappschuss');
+        $ausgabe = $webfrontDouble(22284, 2);
+        check('WebFront meldet Ablehnung datensparsam: ' . $fall,
+            $ausgabe === 'Befehl fehlgeschlagen. Details im RoboHub-Meldungsprotokoll prüfen; vor erneutem Bedienen den Status aktualisieren.' &&
+            $cg->debug === ['Bedienung: pause: angefordert', 'Bedienung: pause: fehlgeschlagen'] &&
+            count($ct->posts) === $anzahl + ($fall === 'cloudfehler' ? 1 : 0) &&
+            $ck->ReadAttributeString('Schnappschuss') === $stand && $cg->GetValue('Befehl') === 0);
+    }
     foreach (['geschlossen', 'widerrufen', 'verbraucht'] as $zustand) {
         $reset();
         $historisch = json_encode(['zustand' => $zustand, 'cloudGeraetId' => 'offline-e20']);
