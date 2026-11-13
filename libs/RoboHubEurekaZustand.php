@@ -43,7 +43,8 @@ final class RoboHubEurekaZustand
                     'herstellerstatus' => 'Entleert Staub'];
             }
             if ($state === 'ERP_model' && $parent === 'sleep') {
-                return ['zustand' => RoboHubModell::ZUSTAND_SCHLAF, 'konsistent' => true];
+                return ['zustand' => RoboHubModell::ZUSTAND_SCHLAF, 'konsistent' => true,
+                    'herstellerstatus' => 'Schläft'];
             }
         }
         $zustand = RoboHubModell::ZUSTAND_UNBEKANNT;

@@ -1918,6 +1918,10 @@ class RoboHubKonto extends IPSModule
             throw new RoboHubFehler('Eureka: Shadow aus aktueller Sitzung und Modullaufzeit erforderlich.');
         }
         $kontext = ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt];
+        $teppichId = @IPS_GetObjectIDByIdent('EurekaTeppichmodus', 22708);
+        $teppich = $teppichId === false || !function_exists('GetValue') ? null : GetValue($teppichId);
+        $kontext['teppichparameter'] = is_int($teppich) && in_array($teppich, [0, 1], true)
+            ? ['teppichmodus' => $teppich] : [];
         if (in_array($roh['state'] ?? null, ['stop', 'charging', 'charging_finish'], true) ||
             RoboHubEurekaZustand::schlafAktion($g['stand'], $jetzt) === 'start') {
             $auswahl = [];

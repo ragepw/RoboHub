@@ -153,6 +153,7 @@ try {
         $stand = json_decode($ek->ReadAttributeString('Schnappschuss'), true)['offline-e20']['p'];
         $expectedRaw = $et->shadow['state'] . ' / ' . $et->shadow['parentState'];
         if ($fixture['zustand'] === 6) { $expectedRaw = 'Entleert Staub (' . $expectedRaw . ')'; }
+        if ($et->shadow['state'] === 'ERP_model') { $expectedRaw = 'Schläft (' . $expectedRaw . ')'; }
         check('Beobachteter E20-Status bis Gerätemodul: ' . $et->shadow['state'],
             variable(9601, 'Zustand')['value'] === $fixture['zustand']
             && variable(9601, 'ZustandRoh')['value'] === $expectedRaw

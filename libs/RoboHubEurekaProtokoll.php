@@ -62,6 +62,15 @@ final class RoboHubEurekaProtokoll
         return self::rahmen([0x22, 0x02, 0, 2, 0, $mode, $fan, 0, $water, 0, 0], 2);
     }
 
+    /** Plugin 2.5.4 / 16153 cmdCarpetSwitch: off=0, on=1. */
+    public static function teppichmodus(mixed $wert): string
+    {
+        if (!is_int($wert) || !in_array($wert, [0, 1], true)) {
+            throw new RoboHubFehler('Eureka: Nicht belegter Teppichmodus.');
+        }
+        return self::rahmen([0x22, 0x0C, $wert], 2);
+    }
+
     public static function pause(): string { return self::rahmen([0x22, 0x1B, 0], 2); }
     public static function fortsetzen(): string { return self::rahmen([0x22, 0x1C, 0], 2); }
     public static function station(): string { return self::rahmen([0x22, 0x01, 0], 2); }

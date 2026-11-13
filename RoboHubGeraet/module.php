@@ -155,7 +155,7 @@ class RoboHubGeraet extends IPSModule
 
     public function RequestAction($Ident, $Value)
     {
-        if (in_array($Ident, ['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'], true)) {
+        if (in_array($Ident, ['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe', 'EurekaTeppichmodus', 'EurekaTeppichAnwenden'], true)) {
             if (!$this->istEurekaE20()) {
                 throw new Exception('Eureka: Einstellung erfordert Modell E20 Evo Plus und ein verbundenes Eureka-Konto.');
             }
@@ -166,6 +166,8 @@ class RoboHubGeraet extends IPSModule
                 throw new Exception('Eureka: Auswahlwert muss eine Ganzzahl sein.');
             }
             $erlaubt = match ($Ident) {
+                'EurekaTeppichmodus' => [0, 1],
+                'EurekaTeppichAnwenden' => [1],
                 'EurekaReinigungsart' => [0, 2],
                 'EurekaStartSaugstufe' => [1, 2, 3],
                 default => $this->GetValue('EurekaReinigungsart') === 0 ? [0] :
@@ -173,6 +175,16 @@ class RoboHubGeraet extends IPSModule
             };
             if (!in_array($Value, $erlaubt, true)) {
                 throw new Exception('Eureka: Nicht belegte oder widersprüchliche Reinigungsauswahl.');
+            }
+            if ($Ident === 'EurekaTeppichAnwenden') {
+                $wert = $this->GetValue('EurekaTeppichmodus');
+                if (!is_int($wert) || !in_array($wert, [0, 1], true)) {
+                    throw new Exception('Eureka: Bitte Teppichmodus auswählen.');
+                }
+                if (!$this->fuehreAus('teppichmodus', ['teppichmodus' => $wert], true)) {
+                    throw new Exception('Eureka: Teppichmodus wurde nicht bestätigt gesendet.');
+                }
+                return;
             }
             // Rein lokale Auswahl für den nächsten Auftrag. Kein Kontoaufruf.
             if ($Ident === 'EurekaReinigungsart' && $Value !== $this->GetValue($Ident)) {
@@ -1244,6 +1256,8 @@ class RoboHubGeraet extends IPSModule
         $aktiv = $this->istEurekaE20();
         $position = 20;
         foreach ([
+            'EurekaTeppichmodus' => ['Teppichverstärkung (Sollwert)', [0 => 'Aus', 1 => 'Ein']],
+            'EurekaTeppichAnwenden' => ['Teppichverstärkung anwenden', [1 => 'Anwenden']],
             'EurekaReinigungsart' => ['Reinigungsart (nächster Auftrag)', [0 => 'Nur Saugen', 2 => 'Saugen und Wischen']],
             'EurekaStartSaugstufe' => ['Saugleistung (nächster Auftrag)', [1 => 'Sanft', 2 => 'Standard', 3 => 'Stark']],
             'EurekaStartWasserstufe' => ['Wassermenge (nächster Auftrag)', [0 => 'Aus', 1 => 'Niedrig', 2 => 'Standard', 3 => 'Hoch']],
@@ -1251,7 +1265,7 @@ class RoboHubGeraet extends IPSModule
             $neu = !$this->hatVariable($ident);
             if (!$aktiv && $neu) { continue; }
             $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER,
-                $aktiv ? $this->eurekaAuswahlProfil($ident, [-1 => 'Bitte auswählen'] + $optionen) : '', $position++, $aktiv);
+                $aktiv ? $this->eurekaAuswahlProfil($ident, [-1 => $ident === 'EurekaTeppichAnwenden' ? 'Bereit' : 'Bitte auswählen'] + $optionen) : '', $position++, $aktiv);
             if ($aktiv) {
                 if ($neu) { $this->SetValue($ident, -1); }
                 $this->EnableAction($ident);

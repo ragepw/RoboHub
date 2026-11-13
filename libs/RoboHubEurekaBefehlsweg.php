@@ -38,7 +38,7 @@ final class RoboHubEurekaBefehlsweg
 
     public static function vorbereiten(array $geraet, string $befehl, array $parameter, array $zuordnungen, int $jetzt, bool $manuell = false): array
     {
-        if (!in_array($befehl, ['start', 'pause', 'station'], true)) {
+        if (!in_array($befehl, ['start', 'pause', 'station', 'teppichmodus'], true)) {
             throw new RoboHubFehler('Eureka: Dieser Befehl bleibt gesperrt.');
         }
         RoboHubEurekaProtokoll::pruefeZuordnung($geraet, $zuordnungen);
@@ -113,10 +113,15 @@ final class RoboHubEurekaBefehlsweg
             $hex = RoboHubEurekaProtokoll::pause();
         } elseif ($befehl === 'station' && in_array($gruppe, ['idle', 'paused', 'cleaning'], true)) {
             $hex = RoboHubEurekaProtokoll::station();
+        } elseif ($befehl === 'teppichmodus' && in_array($gruppe, ['idle', 'docked', 'paused', 'cleaning'], true)) {
+            if (array_keys($parameter) !== ['teppichmodus']) {
+                throw new RoboHubFehler('Eureka: Expliziter Teppichmodus erforderlich.');
+            }
+            $hex = RoboHubEurekaProtokoll::teppichmodus($parameter['teppichmodus']);
         } else {
             throw new RoboHubFehler('Eureka: Befehl für diesen Zustand gesperrt.');
         }
-        if ($aktion !== 'start' && $parameter !== []) {
+        if (!in_array($aktion, ['start', 'teppichmodus'], true) && $parameter !== []) {
             throw new RoboHubFehler('Eureka: Unerwartete Befehlsparameter.');
         }
         return ['pfad' => '/devices/commands/' . rawurlencode($geraet['id']), 'body' => ['data' => $hex], 'aktion' => $aktion];
@@ -185,7 +190,7 @@ final class RoboHubEurekaBefehlsweg
         }
         // Global pro Cloud-Gerät, auch über Konto-/Treiber-/Befehlsobjekte hinweg.
         // Kein Token oder individuelle Gerätekennung im Sperrnamen oder Log.
-        if (!in_array($befehl, ['start', 'pause', 'station'], true)) {
+        if (!in_array($befehl, ['start', 'pause', 'station', 'teppichmodus'], true)) {
             throw new RoboHubFehler('Eureka: Dieser Befehl bleibt gesperrt.');
         }
         $id = $geraet['id'] ?? null;
@@ -245,6 +250,9 @@ final class RoboHubEurekaBefehlsweg
             if (is_callable($this->kontextLesen)) {
                 $k = ($this->kontextLesen)($geraet['id'], $buendel);
                 $g = $k['geraet']; $b = $k['buendel']; $zeit = $k['jetzt'];
+                if ($befehl === 'teppichmodus' && ($k['teppichparameter'] ?? []) !== $parameter) {
+                    throw new RoboHubFehler('Eureka: Teppichauswahl geändert; kein Versand.');
+                }
                 if ($startAusEigenschaften && ($k['startparameter'] ?? []) !== $parameter) {
                     throw new RoboHubFehler('Eureka: Startauswahl geändert; kein Versand.');
                 }

@@ -127,12 +127,11 @@ Ein gemeldeter Fehler blockiert weiterhin den neuen Auftrag, ohne aus einem
 unbekannten Fehlercode eine bestimmte Zubehörursache abzuleiten.
 Die Auswahl selbst bleibt unabhängig davon bedienbar.
 
-**Offener Erweiterungspunkt: Teppichmodus.** Modul 39832, Zeilen 727–728,
-liest `carpet_switch` für `rugHanceMode`. Das belegt weder dessen zuverlässige
-HTTPS-Shadow-Zuordnung noch eine hier freigegebene Einstellsequenz. Teppichmodus,
-Teppichverstärkung und Moppverhalten auf Teppich werden nicht implementiert.
-Für eine spätere Erweiterung sind der E20-spezifische Sender, die Statuszuordnung
-und die Wechselwirkungen mit Wasser/Mopp separat zu belegen und zu testen.
+**Ergänzung Teppichmodus:** Der binäre Hersteller-Schalter ist inzwischen durch
+`cmdCarpetSwitch`, den App-Aufruf und das B8-Feld `carpet_switch` belegt.
+Native lokale Auswahl und ausdrückliches Anwenden, Formate, Grenzen und
+fehlende HTTPS-Statuszuordnung sind in
+[eureka-grundfunktionen.md](eureka-grundfunktionen.md) dokumentiert.
 
 ## Bestehende Sicherheitsgrenzen
 

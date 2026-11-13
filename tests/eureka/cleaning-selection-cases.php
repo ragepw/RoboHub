@@ -131,3 +131,28 @@ check('Wischwahl unabhängig von unbelegtem Zubehörstatus verfügbar',
 $shadowAendern(function (&$s) { $s['roh']['deviceFault'] = [1]; });
 $cg->RequestAction('Befehl', 1);
 check('Gemeldeter Fehler bleibt Startsperre trotz verfügbarer Wischwahl', $ct->posts === []);
+
+abschnitt('Eureka: native Teppichauswahl und ausdrückliches Anwenden');
+foreach ([0, 1] as $wert) {
+    $reset('stop');
+    $cg->RequestAction('EurekaTeppichmodus', $wert);
+    $cg->ApplyChanges();
+    check('Teppichauswahl und Modulstart bleiben lokal', $ct->posts === [] && $ct->reads === []
+        && $cg->GetValue('EurekaTeppichmodus') === $wert);
+    $cg->RequestAction('EurekaTeppichAnwenden', 1);
+    check('Ausdrückliches Anwenden sendet genau belegten Teppichframe', count($ct->posts) === 1
+        && $ct->posts[0][2] === ['data' => RoboHubEurekaProtokoll::teppichmodus($wert)]);
+}
+foreach ([-1, 2, '1', true, null, [], 1.0] as $wert) {
+    $reset('stop'); $vorher = $cg->GetValue('EurekaTeppichmodus'); $fehler = false;
+    try { $cg->RequestAction('EurekaTeppichmodus', $wert); } catch (Exception $e) { $fehler = true; }
+    check('Ungültige Teppichauswahl bleibt lokal gesperrt', $fehler && $ct->posts === [] && $ct->reads === []
+        && $cg->GetValue('EurekaTeppichmodus') === $vorher);
+}
+$reset('stop'); $cg->SetValue('EurekaTeppichmodus', -1); $fehler = false;
+try { $cg->RequestAction('EurekaTeppichAnwenden', 1); } catch (Exception $e) { $fehler = true; }
+check('Anwenden ohne Auswahl sendet nichts', $fehler && $ct->posts === [] && $ct->reads === []);
+$reset('stop'); $cg->RequestAction('EurekaTeppichmodus', 1);
+$ct->vorTransport = function () use ($cg): void { $cg->SetValue('EurekaTeppichmodus', 0); };
+try { $cg->RequestAction('EurekaTeppichAnwenden', 1); } catch (Exception $e) { }
+check('Geänderte Teppichauswahl vor Transport sperrt Versand', $ct->posts === []);

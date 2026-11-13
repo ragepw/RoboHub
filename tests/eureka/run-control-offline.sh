@@ -19,6 +19,8 @@ php -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo,curl
 python3 tests/eureka/diagnostic-native-test.py
 php tests/eureka/command-test.php
 php tests/eureka/state-test.php
+php tests/eureka/grundfunktionen-test.php
+php tests/eureka/parameter-cache-test.php
 php tests/eureka/token-test.php
 php .tools/test-robohub.php
 rg --files --hidden --no-ignore -g "*.php" -0 | xargs -0 -n1 php -l
