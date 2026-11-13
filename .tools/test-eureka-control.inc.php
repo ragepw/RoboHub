@@ -87,7 +87,7 @@ try {
         $ct->posts = []; $ct->vorTransport = null; $ct->reads = []; $ct->leseAntwort = null;
         $ck->SetBuffer('EurekaBedienRefreshBis', ''); $ck->SetBuffer('EurekaLetzteBedienung', '');
         $ct->antwort = ['status' => 200, 'response' => '{"errorCode":0}'];
-        $cg->props['EurekaStartSaugstufe'] = -1; $cg->props['EurekaStartWasserstufe'] = -1;
+        $cg->SetValue('EurekaStartSaugstufe', -1); $cg->SetValue('EurekaStartWasserstufe', -1); $cg->SetValue('EurekaReinigungsart', 2);
         $cg->props['GeraetID'] = 'offline-e20'; $cg->props['Deaktiviert'] = false; $cg->parent = $ck;
     };
     $shadowAendern = function (callable $aendern) use ($ck): void {
@@ -158,7 +158,7 @@ try {
 
     // Zusammenhängende Bedienung ohne Zurücksetzen von Sitzungs-/Versuchsverbrauch.
     $reset('stop');
-    $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+    $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
     foreach ([['stop', 1, RoboHubEurekaProtokoll::start(2, 0, 8)],
         ['cleaning', 2, RoboHubEurekaProtokoll::pause()],
         ['pause', 1, RoboHubEurekaProtokoll::fortsetzen()],
@@ -169,7 +169,7 @@ try {
             $s['roh']['batteryLevel'] = 87 - $schritt;
         });
         if ($schritt > 0) {
-            $cg->props['EurekaStartSaugstufe'] = -1; $cg->props['EurekaStartWasserstufe'] = -1;
+            $cg->SetValue('EurekaStartSaugstufe', -1); $cg->SetValue('EurekaStartWasserstufe', -1); $cg->SetValue('EurekaReinigungsart', 2);
         }
         $vorher = $ck->ReadAttributeString('Schnappschuss');
         $cg->RequestAction('Befehl', $action);
@@ -183,7 +183,7 @@ try {
         foreach ([1, 2, 3] as $fan) {
             foreach ([0, 1, 2, 3] as $water) {
                 $reset($state);
-                $cg->props['EurekaStartSaugstufe'] = $fan; $cg->props['EurekaStartWasserstufe'] = $water;
+                $cg->SetValue('EurekaStartSaugstufe', $fan); $cg->SetValue('EurekaStartWasserstufe', $water); $cg->SetValue('EurekaReinigungsart', ($water) === 0 ? 0 : 2);
                 $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
                 check('Explizite Startauswahl ' . $state . '/' . $fan . '/' . $water,
                     count($ct->posts) === 1 && $ct->posts[0][2] === ['data' => RoboHubEurekaProtokoll::start($fan, $water, 8)]);
@@ -194,7 +194,7 @@ try {
         'sleep', 'charging_back', 'wiping_back', 'collecting_dust', 'upgrading', 'error', 'unknown'] as $state) {
         foreach ([1, 2, 4] as $action) {
             $reset($state);
-            $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+            $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
             $cg->RequestAction('Befehl', $action);
             $erlaubt = match ($action) {
                 1 => in_array($state, ['stop', 'charging', 'charging_finish', 'pause'], true),
@@ -207,14 +207,14 @@ try {
     foreach ([['cleaning', 2], ['pause', 1], ['stop', 4], ['pause', 4], ['cleaning', 4]] as [$state, $action]) {
         $reset($state);
         $shadowAendern(function (&$s): void { unset($s['roh']['batteryLevel']); });
-        $cg->props['EurekaStartSaugstufe'] = 999; $cg->props['EurekaStartWasserstufe'] = 999;
+        $cg->SetValue('EurekaStartSaugstufe', 999); $cg->SetValue('EurekaStartWasserstufe', 999); $cg->SetValue('EurekaReinigungsart', 2);
         $cg->RequestAction('Befehl', $action);
         check('Keine Startparameter-/Akkusperre für ' . $state . '/' . $action, count($ct->posts) === 1);
     }
-    foreach (['EurekaStartSaugstufe', 'EurekaStartWasserstufe'] as $eigenschaft) {
+    foreach (['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'] as $eigenschaft) {
         $reset('stop');
-        $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
-        $ct->vorTransport = function () use ($cg, $eigenschaft): void { $cg->props[$eigenschaft] = 3; };
+        $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
+        $ct->vorTransport = function () use ($cg, $eigenschaft): void { $cg->SetValue($eigenschaft, 3); };
         $cg->RequestAction('Befehl', RoboHubModell::BEFEHL_START);
         check('Geänderte Startauswahl vor I/O sperrt: ' . $eigenschaft, $ct->posts === []);
         $ct->vorTransport = null;
@@ -225,7 +225,7 @@ try {
         ['cleaning', RoboHubModell::BEFEHL_PAUSE, 'AA0DB800000000000002221B00FC'], ['pause', RoboHubModell::BEFEHL_START, 'AA0DB800000000000002221C00FB'],
         ['cleaning', RoboHubModell::BEFEHL_STATION, 'AA0DB80000000000000222010016']] as [$state, $action, $hex]) {
         $reset($state);
-        if ($state === 'stop') { $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0; }
+        if ($state === 'stop') { $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0); }
         $snapshot = $ck->ReadAttributeString('Schnappschuss');
         $cg->RequestAction('Befehl', $action);
         check('RequestAction 22708/22284: ' . $state . '/' . $action,
@@ -252,9 +252,9 @@ try {
             case 'fault': $shadowAendern(function (&$s) { $s['roh']['deviceFault'] = [1]; }); break;
             case 'missing-fault': $shadowAendern(function (&$s) { unset($s['roh']['deviceFault']); }); break;
             case 'missing-start': $reset('stop'); $action = RoboHubModell::BEFEHL_START; break;
-            case 'invalid-fan': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->props['EurekaStartSaugstufe'] = 4; $cg->props['EurekaStartWasserstufe'] = 0; break;
-            case 'invalid-water': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = -1; break;
-            case 'battery': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+            case 'invalid-fan': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->SetValue('EurekaStartSaugstufe', 4); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0); break;
+            case 'invalid-water': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', -1); $cg->SetValue('EurekaReinigungsart', 2); break;
+            case 'battery': $reset('stop'); $action = RoboHubModell::BEFEHL_START; $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
                 $shadowAendern(function (&$s) { $s['roh']['batteryLevel'] = 15; }); break;
             case 'binding': $cg->parent = null; break;
             case 'disabled': $cg->props['Deaktiviert'] = true; break;
@@ -320,7 +320,7 @@ try {
     check('Alter Shadow bleibt nach Neustart gesperrt', count($ct->posts) === 1);
     foreach ([1, 2, 4] as $typ) {
         $reset('ERP_model');
-        $cg->props['EurekaStartSaugstufe'] = 1; $cg->props['EurekaStartWasserstufe'] = 0;
+        $cg->SetValue('EurekaStartSaugstufe', 1); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
         $shadowAendern(function (&$s) use ($typ) {
             $s['roh']['parentState'] = 'sleep'; $s['roh']['cleanMissionState'] = 'no_cleaning_mission';
             $s['b8'] = ['zeit' => time(), 'felder' => ['arbeit' => 12, 'akku' => 87,
@@ -335,6 +335,7 @@ try {
         check('Schlafbefund überwindet keine Sitzungsbindung ' . $typ, count($ct->posts) === 1);
     }
     require __DIR__ . '/../tests/eureka/control-refresh-cases.php';
+    require __DIR__ . '/../tests/eureka/cleaning-selection-cases.php';
 } finally {
     unset($GLOBALS['EUREKA_CONTROL_LOCKS']);
     $GLOBALS['robohubTreiberFabrik'] = $controlFabrik;

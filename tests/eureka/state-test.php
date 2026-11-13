@@ -56,7 +56,7 @@ foreach (['cleaning', 'sleep', 'error', null, [], true, 2] as $i => $parent) {
 }
 $tests['Ungültige Typen warnen nicht und löschen keinen Rohbefund'] = static function (): void {
     $r = (new RoboHubEureka())->normalisiere('', ['state' => [], 'parentState' => false, 'fanLevel' => [], 'batteryLevel' => [], 'deviceFault' => null]);
-    commandAssert($r['werte']['Zustand'] === -1 && $r['werte']['Akku'] === null && !isset($r['werte']['Saugstufe']));
+    commandAssert($r['werte']['Zustand'] === -1 && $r['werte']['Akku'] === null && $r['werte']['Saugstufe'] === 'Unbekannt');
     commandAssert(json_decode($r['werte']['ZustandRoh'], true) === ['state' => [], 'parentState' => false]);
     commandAssert($r['werte']['Fehler'] === 'null');
     foreach ([-1, 101, '87', true, 87.5] as $battery) {

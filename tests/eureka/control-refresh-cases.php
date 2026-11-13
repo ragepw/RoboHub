@@ -20,7 +20,7 @@ $anfrage = static fn(string $cmd = 'pause', string $id = 'offline-e20', string $
 foreach ([['stop', 1], ['pause', 1], ['cleaning', 2], ['cleaning', 4]] as [$state, $action]) {
     foreach (['frisch', 'liste', 'listenempfang', 'shadow', 'shadow-runtime', 'shadow-session', 'beide', 'leer'] as $fall) {
         $reset($state); $lesedaten($state);
-        $cg->props['EurekaStartSaugstufe'] = 2; $cg->props['EurekaStartWasserstufe'] = 0;
+        $cg->SetValue('EurekaStartSaugstufe', 2); $cg->SetValue('EurekaStartWasserstufe', 0); $cg->SetValue('EurekaReinigungsart', 0);
         if (in_array($fall, ['liste', 'beide'], true)) { $ck->WriteAttributeInteger('GeraeteStand', time() - 121); }
         if ($fall === 'listenempfang') { $listeAendern(function (&$g) { $g['verbindungEmpfangen'] -= 121; }); }
         if (in_array($fall, ['shadow', 'beide'], true)) { $shadowAendern(function (&$s) { $s['zeit'] -= 121; }); }

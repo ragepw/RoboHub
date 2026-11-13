@@ -1920,8 +1920,17 @@ class RoboHubKonto extends IPSModule
         $kontext = ['geraet' => $g, 'buendel' => $b, 'jetzt' => $jetzt];
         if (in_array($roh['state'] ?? null, ['stop', 'charging', 'charging_finish'], true) ||
             RoboHubEurekaZustand::schlafAktion($g['stand'], $jetzt) === 'start') {
-            $kontext['startparameter'] = ['fan' => IPS_GetProperty(22708, 'EurekaStartSaugstufe'),
-                'water' => IPS_GetProperty(22708, 'EurekaStartWasserstufe'), 'mode' => 8];
+            $auswahl = [];
+            foreach (['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'] as $ident) {
+                $vid = @IPS_GetObjectIDByIdent($ident, 22708);
+                $auswahl[] = $vid === false ? -1 : GetValue($vid);
+            }
+            [$art, $fan, $water] = $auswahl;
+            // Ungültige Auswahl sperrt nur einen neuen Auftrag. Pause/Dock
+            // und Fortsetzen dürfen davon nicht abhängen.
+            $gueltig = is_int($art) && is_int($fan) && is_int($water) &&
+                (($art === 0 && $water === 0) || ($art === 2 && in_array($water, [1, 2, 3], true)));
+            $kontext['startparameter'] = $gueltig ? ['fan' => $fan, 'water' => $water, 'mode' => 8] : [];
         }
         return $kontext;
     }

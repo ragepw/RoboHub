@@ -440,8 +440,10 @@ class RoboHubEureka implements RoboHubTreiber
                 ? $p['batteryLevel'] : null,
         ];
 
-        if (is_int($p['fanLevel'] ?? null) || is_string($p['fanLevel'] ?? null)) {
-            $daten['Saugstufe'] = (string)$p['fanLevel'];
+        // Istwerte separat von der lokalen Auswahl für den nächsten Auftrag.
+        foreach (['fanLevel' => 'Saugstufe', 'waterLevel' => 'Wassermenge', 'autoType' => 'Reinigungsmodus'] as $quelle => $ziel) {
+            $daten[$ziel] = is_int($p[$quelle] ?? null) || is_string($p[$quelle] ?? null)
+                ? (string)$p[$quelle] : 'Unbekannt';
         }
 
         if (array_key_exists('deviceFault', $p)) {

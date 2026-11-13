@@ -50,7 +50,8 @@ class RoboHubGeraet extends IPSModule
         $this->RegisterPropertyString('Modell', '');
         $this->RegisterPropertyString('Klasse', RoboHubModell::KLASSE_SAUGER);
         $this->RegisterPropertyInteger('Intervall', 120);
-        // Keine Startdefaults: -1 verlangt eine ausdrückliche Wahl in der Instanz.
+        // Historische Eigenschaften nur für gespeicherte Instanzen behalten;
+        // der Start liest ausschließlich die nativen Auswahlvariablen.
         $this->RegisterPropertyInteger('EurekaStartSaugstufe', -1);
         $this->RegisterPropertyInteger('EurekaStartWasserstufe', -1);
         // Eigenständige Seite (IPSView/Browser): Bedienen nur, wenn ausdrücklich
@@ -102,6 +103,7 @@ class RoboHubGeraet extends IPSModule
         $this->MaintainVariable('Zustand', RoboHubText::t('State'), VARIABLETYPE_INTEGER, $this->presAnzeige($this->zustandsOptionen($klasse)), 10, true);
         $this->MaintainVariable('Befehl', RoboHubText::t('Command'), VARIABLETYPE_INTEGER, $this->presEnum($this->befehlsOptionen($klasse)), 5, true);
         $this->EnableAction('Befehl');
+        $this->eurekaAuswahlAnlegen();
         $this->SetVisualizationType(1);
         if ($this->ReadAttributeString('WebSchluessel') === '') {
             $this->WriteAttributeString('WebSchluessel', bin2hex(random_bytes(12)));
@@ -153,6 +155,26 @@ class RoboHubGeraet extends IPSModule
 
     public function RequestAction($Ident, $Value)
     {
+        if (in_array($Ident, ['EurekaReinigungsart', 'EurekaStartSaugstufe', 'EurekaStartWasserstufe'], true)) {
+            if (!$this->istEurekaE20() || $this->ReadPropertyBoolean('Deaktiviert') || !is_int($Value)) {
+                throw new Exception('Eureka: Einstellung für dieses Gerät oder diesen Wert gesperrt.');
+            }
+            $erlaubt = match ($Ident) {
+                'EurekaReinigungsart' => [0, 2],
+                'EurekaStartSaugstufe' => [1, 2, 3],
+                default => $this->GetValue('EurekaReinigungsart') === 0 ? [0] :
+                    ($this->GetValue('EurekaReinigungsart') === 2 ? [1, 2, 3] : []),
+            };
+            if (!in_array($Value, $erlaubt, true)) {
+                throw new Exception('Eureka: Nicht belegte oder widersprüchliche Reinigungsauswahl.');
+            }
+            // Rein lokale Auswahl für den nächsten Auftrag. Kein Kontoaufruf.
+            if ($Ident === 'EurekaReinigungsart' && $Value !== $this->GetValue($Ident)) {
+                $this->SetValue('EurekaStartWasserstufe', $Value === 0 ? 0 : -1);
+            }
+            $this->SetValue($Ident, $Value);
+            return;
+        }
         switch ($Ident) {
             case 'Befehl':
                 $befehl = $this->befehlsName((int)$Value);
@@ -1204,6 +1226,33 @@ class RoboHubGeraet extends IPSModule
         return ['PRESENTATION' => VARIABLE_PRESENTATION_VALUE_PRESENTATION, 'INTERVALS_ACTIVE' => true, 'INTERVALS' => json_encode($intervalle)];
     }
 
+    private function istEurekaE20(): bool
+    {
+        $konto = (int)(IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+        return $this->ReadPropertyString('Modell') === 'E20 Evo Plus' && $konto > 0 &&
+            IPS_GetProperty($konto, 'Hersteller') === 'eureka';
+    }
+
+    private function eurekaAuswahlAnlegen(): void
+    {
+        $aktiv = $this->istEurekaE20();
+        $position = 20;
+        foreach ([
+            'EurekaReinigungsart' => ['Reinigungsart (nächster Auftrag)', [0 => 'Nur saugen', 2 => 'Saugen und wischen']],
+            'EurekaStartSaugstufe' => ['Saugleistung (nächster Auftrag)', [1 => 'Sanft', 2 => 'Standard', 3 => 'Stark']],
+            'EurekaStartWasserstufe' => ['Wassermenge (nächster Auftrag)', [0 => 'Aus', 1 => 'Niedrig', 2 => 'Standard', 3 => 'Hoch']],
+        ] as $ident => [$name, $optionen]) {
+            $neu = !$this->hatVariable($ident);
+            if (!$aktiv && $neu) { continue; }
+            $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER,
+                $this->presEnum([-1 => 'Bitte auswählen'] + $optionen), $position++, $aktiv);
+            if ($aktiv) {
+                if ($neu) { $this->SetValue($ident, -1); }
+                $this->EnableAction($ident);
+            }
+        }
+    }
+
     private function presEnum(array $map): array
     {
         $options = [];
@@ -1598,17 +1647,6 @@ class RoboHubGeraet extends IPSModule
                 $this->kontoZeile(),
                 ['type' => 'Label', 'name' => 'AbrufZeile', 'caption' => $zeile],
                 ['type' => 'NumberSpinner', 'name' => 'Intervall', 'caption' => 'Poll every', 'suffix' => ' s', 'minimum' => 30, 'maximum' => 3600],
-                ['type' => 'Select', 'name' => 'EurekaStartSaugstufe', 'caption' => 'Eureka: suction for a new whole-home cleaning',
-                    'visible' => $this->ReadPropertyString('Modell') === 'E20 Evo Plus', 'options' => [
-                        ['caption' => 'Not selected (new start blocked)', 'value' => -1],
-                        ['caption' => '1', 'value' => 1], ['caption' => '2', 'value' => 2], ['caption' => '3', 'value' => 3],
-                    ]],
-                ['type' => 'Select', 'name' => 'EurekaStartWasserstufe', 'caption' => 'Eureka: water for a new whole-home cleaning',
-                    'visible' => $this->ReadPropertyString('Modell') === 'E20 Evo Plus', 'options' => [
-                        ['caption' => 'Not selected (new start blocked)', 'value' => -1],
-                        ['caption' => '0 (no water)', 'value' => 0], ['caption' => '1', 'value' => 1],
-                        ['caption' => '2', 'value' => 2], ['caption' => '3', 'value' => 3],
-                    ]],
                 ['type' => 'Label', 'caption' => RoboHubText::t('While the robot is working, RoboHub automatically polls every %s s — unless real-time messages arrive (account instance). Shorter intervals load the vendor cloud, which imposes a lockout period after too many requests.', self::TAKT_AKTIV_S)],
                 ['type' => 'Label', 'caption' => $this->ReadAttributeInteger('LetzteEchtzeit') > 0 ? RoboHubText::t('⚡ Last real-time message %s.', date('d.m.Y H:i:s', $this->ReadAttributeInteger('LetzteEchtzeit'))) : 'ℹ️ No real-time message received yet.'],
                 ['type' => 'Label', 'caption' => $raumZeile],
