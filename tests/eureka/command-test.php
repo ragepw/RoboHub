@@ -569,6 +569,7 @@ foreach ([['stop', 'start', ['fan' => 2, 'water' => 0, 'mode' => 8]],
         };
     }
 }
+require __DIR__ . '/sleep-pause-cases.php';
 $errors = 0;
 // Warnungen (etwa implizite Typumwandlungen) sind ebenfalls Testfehler.
 set_error_handler(static function (int $severity, string $message): never { throw new RuntimeException('PHP-Warnung im Offline-Test.'); });

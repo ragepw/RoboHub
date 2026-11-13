@@ -75,7 +75,7 @@ final class RoboHubEurekaBefehlsweg
             'pause' => 'paused',
             'stop' => 'idle',
             'charging', 'charging_finish' => 'docked',
-            'ERP_model' => $schlaf === null ? null : 'sleep-' . $schlaf,
+            'ERP_model', 'sleep_pause' => $schlaf === null ? null : 'sleep-' . $schlaf,
             default => null,
         };
         // Nur feste lokale Gründe ausgeben, niemals Herstellerwerte oder Kennungen.

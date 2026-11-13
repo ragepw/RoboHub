@@ -31,6 +31,10 @@ final class RoboHubEurekaZustand
     {
         $state = $p['state'] ?? '';
         $parent = $p['parentState'] ?? '';
+        if (self::schlafPause($p)) {
+            return ['zustand' => RoboHubModell::ZUSTAND_SCHLAF, 'konsistent' => true,
+                'herstellerstatus' => 'Schläft (Auftrag pausiert)'];
+        }
         // Ausschließlich die vom Nutzer beobachteten E20-Shadowkombinationen.
         // Keine allgemeine ERP-/Stationsheuristik aus diesen Einzelbelegen.
         if (($p['cleanMissionState'] ?? null) === 'no_cleaning_mission') {
@@ -90,10 +94,26 @@ final class RoboHubEurekaZustand
             } : null];
     }
 
-    /** Ergänzender Diagnosebefund im bestehenden, sitzungsgebundenen Statusstand. */
+    /** Exakte Live-Beobachtung; Hersteller-Continue-Beleg: docs/eureka-sleep-pause.md. */
+    private static function schlafPause(array $roh): bool
+    {
+        return ($roh['state'] ?? null) === 'sleep_pause' &&
+            ($roh['parentState'] ?? null) === 'sleep' &&
+            ($roh['cleanMissionState'] ?? null) === 'have_cleaning_mission' &&
+            ($roh['deviceFault'] ?? null) === [];
+    }
+
+    /** Lokale Schlafentscheidung; ERP benötigt weiterhin den ergänzenden B8-Beleg. */
     public static function schlafAktion(array $stand, int $jetzt): ?string
     {
         $roh = $stand['roh'] ?? [];
+        if (is_array($roh) && self::schlafPause($roh)) {
+            // Hersteller-startClean prüft auch vor Schlaf-Continue den Akku.
+            return is_int($stand['zeit'] ?? null) && $stand['zeit'] > 0 &&
+                $stand['zeit'] <= $jetzt && $jetzt - $stand['zeit'] <= 120 &&
+                is_int($roh['batteryLevel'] ?? null) && $roh['batteryLevel'] > 15 &&
+                $roh['batteryLevel'] <= 100 ? 'resume' : null;
+        }
         $b8 = $stand['b8'] ?? [];
         $f = $b8['felder'] ?? [];
         if (($roh['state'] ?? null) !== 'ERP_model' || ($roh['parentState'] ?? null) !== 'sleep' ||
